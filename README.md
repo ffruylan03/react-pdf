@@ -82,7 +82,7 @@ function MyApp() {
 }
 ```
 
-Check the [sample directory](https://github.com/wojtekmaj/react-pdf/tree/master/sample) in this repository for a full working example. For more examples and more advanced use cases, check [Recipes](https://github.com/wojtekmaj/react-pdf/wiki/Recipes) in [React-PDF Wiki](https://github.com/wojtekmaj/react-pdf/wiki/).
+Check the [sample directory](https://github.com/wojtekmaj/react-pdf/tree/main/sample) in this repository for a full working example. For more examples and more advanced use cases, check [Recipes](https://github.com/wojtekmaj/react-pdf/wiki/Recipes) in [React-PDF Wiki](https://github.com/wojtekmaj/react-pdf/wiki/).
 
 ### Enable PDF.js worker
 
@@ -93,23 +93,25 @@ It is crucial for performance to use PDF.js worker whenever possible. This ensur
 Instead of directly importing modules you need from `'react-pdf'`, import them like so:
 
 ```js
-// using ES6 modules
 import { Document, Page } from 'react-pdf/dist/esm/entry.webpack';
-
-// using CommonJS modules
-import { Document, Page } from 'react-pdf/dist/umd/entry.webpack';
 ```
 
-#### Parcel
+#### Parcel 1
 
 Instead of directly importing modules you need from `'react-pdf'`, import them like so:
 
 ```js
-// using ES6 modules
 import { Document, Page } from 'react-pdf/dist/esm/entry.parcel';
+```
 
-// using CommonJS modules
-import { Document, Page } from 'react-pdf/dist/umd/entry.parcel';
+#### Parcel 2
+
+Configure React-PDF by providing worker URL like so:
+
+```js
+import { pdfjs } from 'react-pdf';
+
+pdfjs.GlobalWorkerOptions.workerSrc = new URL('npm:react-pdf/dist/esm/pdf.worker.entry.js', import.meta.url);
 ```
 
 #### Create React App
@@ -121,6 +123,17 @@ Create React App uses Webpack under the hood, so you can follow [Webpack instruc
 #### Standard (Browserify and others)
 
 If you use Browserify or other bundling tools, you will have to make sure on your own that `pdf.worker.js` file from `pdfjs-dist/build` is copied to your project's output folder.
+
+For example, you could use a custom script like:
+
+```js
+import path from 'path';
+import fs from 'fs';
+
+const pdfWorkerPath = path.join(path.dirname(require.resolve('pdfjs-dist/package.json')), 'build', 'pdf.worker.js');
+
+fs.copyFileSync(pdfWorkerPath, './dist/pdf.worker.js');
+```
 
 If you don't need to debug `pdf.worker.js`, you can use `pdf.worker.min.js` file instead, which is roughly half the size. For this to work, however, you will need to specify `workerSrc` manually like so:
 
@@ -141,11 +154,7 @@ pdfjs.GlobalWorkerOptions.workerSrc = `//cdnjs.cloudflare.com/ajax/libs/pdf.js/$
 If you want to use annotations (e.g. links) in PDFs rendered by React-PDF, then you would need to include stylesheet necessary for annotations to be correctly displayed like so:
 
 ```js
-// using ES6 modules
 import 'react-pdf/dist/esm/Page/AnnotationLayer.css';
-
-// using CommonJS modules
-import 'react-pdf/dist/umd/Page/AnnotationLayer.css';
 ```
 
 ### Support for non-latin characters
@@ -173,23 +182,47 @@ npm install copy-webpack-plugin --save-dev
 Now, in your Webpack config, import the plugin:
 
 ```js
+import path from 'path';
 import CopyWebpackPlugin from 'copy-webpack-plugin';
 ```
 
 and in `plugins` section of your config, add the following:
 
 ```js
-new CopyWebpackPlugin([
-  {
-    from: 'node_modules/pdfjs-dist/cmaps/',
-    to: 'cmaps/'
-  },
-]),
+new CopyWebpackPlugin({
+  patterns: [
+    {
+      from: path.join(path.dirname(require.resolve('pdfjs-dist/package.json')), 'cmaps'),
+      to: 'cmaps/'
+    },
+  ],
+}),
 ```
 
 ##### Parcel, Browserify and others
 
 If you use Parcel, Browserify or other bundling tools, you will have to make sure on your own that cMaps are copied to your project's output folder.
+
+For example, you could use a custom script like:
+
+```js
+import path from 'path';
+import fs from 'fs';
+
+const cMapsDir = path.join(path.dirname(require.resolve('pdfjs-dist/package.json')), 'cmaps');
+
+function copyDir(from, to) {
+  const files = fs.readdirSync(from);
+  fs.mkdirSync(to);
+  files.forEach((file) => {
+    const fromFile = path.join(from, file);
+    const toFile = path.join(to, file);
+    fs.copyFileSync(fromFile, toFile);
+  });
+}
+
+copyDir(cMapsDir, 'dist/cmaps/');
+```
 
 #### Setting up React-PDF
 
