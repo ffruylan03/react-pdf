@@ -4,6 +4,8 @@
   "description": "A sample page for React-PDF.",
   "private": true,
   "scripts": {
+    "copy-cmaps": "node ./scripts/copy-cmaps.js",
+    "copy-standard-fonts": "node ./scripts/copy-standard-fonts.js",
     "build": "parcel build index.html --public-url ./",
     "start": "parcel index.html"
   },
