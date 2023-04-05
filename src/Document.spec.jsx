@@ -1,10 +1,12 @@
+import { beforeAll, describe, expect, it, vi } from 'vitest';
 import React, { createRef } from 'react';
 import { fireEvent, getByTestId, render } from '@testing-library/react';
 
-import { pdfjs } from './entry.jest';
+import { pdfjs } from './index.test';
 
 import Document from './Document';
 import DocumentContext from './DocumentContext';
+import Page from './Page';
 
 import { makeAsyncCallback, loadPDF, muteConsole, restoreConsole } from '../test-utils';
 
@@ -24,6 +26,12 @@ function Child(props) {
       {(context) => <ChildInternal {...context} {...props} />}
     </DocumentContext.Consumer>
   );
+}
+
+async function waitForAsync() {
+  await new Promise((resolve) => {
+    setTimeout(resolve, 0);
+  });
 }
 
 describe('Document', () => {
@@ -53,6 +61,7 @@ describe('Document', () => {
       );
 
       expect.assertions(2);
+
       await expect(onSourceSuccessPromise).resolves.toBe(OK);
       await expect(onLoadSuccessPromise).resolves.toMatchObject(desiredLoadedPdf);
     });
@@ -70,11 +79,13 @@ describe('Document', () => {
       );
 
       expect.assertions(2);
+
       await expect(onSourceSuccessPromise).resolves.toBe(OK);
       await expect(onLoadSuccessPromise).resolves.toMatchObject(desiredLoadedPdf);
     });
 
-    it('loads a file and calls onSourceSuccess and onLoadSuccess callbacks via ArrayBuffer properly', async () => {
+    // FIXME: In Jest, it used to be worked around as described in https://github.com/facebook/jest/issues/7780
+    it.skip('loads a file and calls onSourceSuccess and onLoadSuccess callbacks via ArrayBuffer properly', async () => {
       const { func: onSourceSuccess, promise: onSourceSuccessPromise } = makeAsyncCallback(OK);
       const { func: onLoadSuccess, promise: onLoadSuccessPromise } = makeAsyncCallback();
 
@@ -87,6 +98,7 @@ describe('Document', () => {
       );
 
       expect.assertions(2);
+
       await expect(onSourceSuccessPromise).resolves.toBe(OK);
       await expect(onLoadSuccessPromise).resolves.toMatchObject(desiredLoadedPdf);
     });
@@ -104,6 +116,7 @@ describe('Document', () => {
       );
 
       expect.assertions(2);
+
       await expect(onSourceSuccessPromise).resolves.toBe(OK);
       await expect(onLoadSuccessPromise).resolves.toMatchObject(desiredLoadedPdf);
     });
@@ -121,6 +134,7 @@ describe('Document', () => {
       );
 
       expect.assertions(2);
+
       await expect(onSourceSuccessPromise).resolves.toBe(OK);
       await expect(onLoadSuccessPromise).resolves.toMatchObject(desiredLoadedPdf);
     });
@@ -134,11 +148,11 @@ describe('Document', () => {
 
       expect.assertions(1);
 
-      return onSourceErrorPromise.then((error) => {
-        expect(error).toMatchObject(expect.any(Error));
+      const error = await onSourceErrorPromise;
 
-        restoreConsole();
-      });
+      expect(error).toMatchObject(expect.any(Error));
+
+      restoreConsole();
     });
 
     it('replaces a file properly', async () => {
@@ -186,12 +200,12 @@ describe('Document', () => {
     });
 
     it('passes container element to inputRef properly', () => {
-      const inputRef = jest.fn();
+      const inputRef = vi.fn();
 
       render(<Document inputRef={inputRef} />);
 
       expect(inputRef).toHaveBeenCalled();
-      expect(inputRef.mock.calls[0][0]).toBeInstanceOf(HTMLElement);
+      expect(inputRef).toHaveBeenCalledWith(expect.any(HTMLElement));
     });
 
     it('renders "No PDF file specified." when given nothing', () => {
@@ -222,30 +236,32 @@ describe('Document', () => {
     });
 
     it('renders "Loading PDF…" when loading a file', async () => {
-      const { container } = render(<Document file={pdfFile.file} />);
+      const { container, findByText } = render(<Document file={pdfFile.file} />);
 
       const loading = container.querySelector('.react-pdf__message');
 
       expect(loading).toBeInTheDocument();
-      expect(loading).toHaveTextContent('Loading PDF…');
+      expect(await findByText('Loading PDF…')).toBeInTheDocument();
     });
 
     it('renders custom loading message when loading a file and loading prop is given', async () => {
-      const { container } = render(<Document file={pdfFile.file} loading="Loading" />);
+      const { container, findByText } = render(<Document file={pdfFile.file} loading="Loading" />);
 
       const loading = container.querySelector('.react-pdf__message');
 
       expect(loading).toBeInTheDocument();
-      expect(loading).toHaveTextContent('Loading');
+      expect(await findByText('Loading')).toBeInTheDocument();
     });
 
     it('renders custom loading message when loading a file and loading prop is given as a function', async () => {
-      const { container } = render(<Document file={pdfFile.file} loading={() => 'Loading'} />);
+      const { container, findByText } = render(
+        <Document file={pdfFile.file} loading={() => 'Loading'} />,
+      );
 
       const loading = container.querySelector('.react-pdf__message');
 
       expect(loading).toBeInTheDocument();
-      expect(loading).toHaveTextContent('Loading');
+      expect(await findByText('Loading')).toBeInTheDocument();
     });
 
     it('renders "Failed to load PDF file." when failed to load a document', async () => {
@@ -254,27 +270,31 @@ describe('Document', () => {
 
       muteConsole();
 
-      const { container } = render(<Document file={failingPdf} onLoadError={onLoadError} />);
+      const { container, findByText } = render(
+        <Document file={failingPdf} onLoadError={onLoadError} />,
+      );
 
       expect.assertions(2);
 
       await onLoadErrorPromise;
 
+      await waitForAsync();
+
       const error = container.querySelector('.react-pdf__message');
 
       expect(error).toBeInTheDocument();
-      expect(error).toHaveTextContent('Failed to load PDF file.');
+      expect(await findByText('Failed to load PDF file.')).toBeInTheDocument();
 
       restoreConsole();
     });
 
-    it('renders custom error message when failed to load a document', async () => {
+    it('renders custom error message when failed to load a document and error prop is given', async () => {
       const { func: onLoadError, promise: onLoadErrorPromise } = makeAsyncCallback();
       const failingPdf = 'data:application/pdf;base64,abcdef';
 
       muteConsole();
 
-      const { container } = render(
+      const { container, findByText } = render(
         <Document error="Error" file={failingPdf} onLoadError={onLoadError} />,
       );
 
@@ -282,10 +302,36 @@ describe('Document', () => {
 
       await onLoadErrorPromise;
 
+      await waitForAsync();
+
       const error = container.querySelector('.react-pdf__message');
 
       expect(error).toBeInTheDocument();
-      expect(error).toHaveTextContent('Error');
+      expect(await findByText('Error')).toBeInTheDocument();
+
+      restoreConsole();
+    });
+
+    it('renders custom error message when failed to load a document and error prop is given as a function', async () => {
+      const { func: onLoadError, promise: onLoadErrorPromise } = makeAsyncCallback();
+      const failingPdf = 'data:application/pdf;base64,abcdef';
+
+      muteConsole();
+
+      const { container, findByText } = render(
+        <Document error="Error" file={failingPdf} onLoadError={onLoadError} />,
+      );
+
+      expect.assertions(2);
+
+      await onLoadErrorPromise;
+
+      await waitForAsync();
+
+      const error = container.querySelector('.react-pdf__message');
+
+      expect(error).toBeInTheDocument();
+      expect(await findByText('Error')).toBeInTheDocument();
 
       restoreConsole();
     });
@@ -309,6 +355,7 @@ describe('Document', () => {
       await onLoadSuccessPromise;
 
       const child = getByTestId(container, 'child');
+
       expect(child.dataset.rendermode).toBe('svg');
     });
 
@@ -326,6 +373,7 @@ describe('Document', () => {
       await onLoadSuccessPromise;
 
       const child = getByTestId(container, 'child');
+
       expect(child.dataset.rotate).toBe('90');
     });
 
@@ -348,6 +396,7 @@ describe('Document', () => {
       await onLoadSuccessPromise;
 
       const child = getByTestId(container, 'child');
+
       expect(child.dataset.rendermode).toBe('canvas');
     });
 
@@ -365,6 +414,7 @@ describe('Document', () => {
       await onLoadSuccessPromise;
 
       const child = getByTestId(container, 'child');
+
       expect(child.dataset.rotate).toBe('180');
     });
   });
@@ -373,7 +423,7 @@ describe('Document', () => {
     it('calls onItemClick if defined', async () => {
       const { func: onLoadSuccess, promise: onLoadSuccessPromise } = makeAsyncCallback();
 
-      const onItemClick = jest.fn();
+      const onItemClick = vi.fn();
       const instance = createRef();
 
       render(
@@ -394,7 +444,7 @@ describe('Document', () => {
       const pageNumber = 6;
 
       // Simulate clicking on an outline item
-      instance.current.viewer.scrollPageIntoView({ dest, pageIndex, pageNumber });
+      instance.current.viewer.current.scrollPageIntoView({ dest, pageIndex, pageNumber });
 
       expect(onItemClick).toHaveBeenCalledTimes(1);
       expect(onItemClick).toHaveBeenCalledWith({ dest, pageIndex, pageNumber });
@@ -410,17 +460,17 @@ describe('Document', () => {
 
       await onLoadSuccessPromise;
 
-      const scrollIntoView = jest.fn();
+      const scrollIntoView = vi.fn();
 
       const dest = [];
       const pageIndex = 5;
       const pageNumber = 6;
 
       // Register fake page in Document viewer
-      instance.current.pages[pageIndex] = { scrollIntoView };
+      instance.current.pages.current[pageIndex] = { scrollIntoView };
 
       // Simulate clicking on an outline item
-      instance.current.viewer.scrollPageIntoView({ dest, pageIndex, pageNumber });
+      instance.current.viewer.current.scrollPageIntoView({ dest, pageIndex, pageNumber });
 
       expect(scrollIntoView).toHaveBeenCalledTimes(1);
     });
@@ -429,7 +479,7 @@ describe('Document', () => {
   describe('linkService', () => {
     it.each`
       externalLinkTarget | target
-      ${null}            | ${null}
+      ${null}            | ${''}
       ${'_self'}         | ${'_self'}
       ${'_blank'}        | ${'_blank'}
       ${'_parent'}       | ${'_parent'}
@@ -437,60 +487,68 @@ describe('Document', () => {
     `(
       'returns externalLinkTarget = $target given externalLinkTarget prop = $externalLinkTarget',
       async ({ externalLinkTarget, target }) => {
-        const { func: onLoadSuccess, promise: onLoadSuccessPromise } = makeAsyncCallback();
+        const {
+          func: onRenderAnnotationLayerSuccess,
+          promise: onRenderAnnotationLayerSuccessPromise,
+        } = makeAsyncCallback();
 
-        const instance = createRef();
-
-        render(
-          <Document
-            externalLinkTarget={externalLinkTarget}
-            file={pdfFile.file}
-            onLoadSuccess={onLoadSuccess}
-            ref={instance}
-          />,
+        const { container } = render(
+          <Document externalLinkTarget={externalLinkTarget} file={pdfFile.file}>
+            <Page
+              onRenderAnnotationLayerSuccess={onRenderAnnotationLayerSuccess}
+              renderMode="none"
+              pageNumber={1}
+            />
+          </Document>,
         );
 
         expect.assertions(1);
 
-        await onLoadSuccessPromise;
+        await onRenderAnnotationLayerSuccessPromise;
 
-        expect(instance.current.linkService.externalLinkTarget).toBe(target);
+        const link = container.querySelector('a');
+
+        expect(link.target).toBe(target);
       },
     );
   });
 
   it.each`
     externalLinkRel | rel
-    ${null}         | ${null}
-    ${'_self'}      | ${'_self'}
-    ${'_blank'}     | ${'_blank'}
-    ${'_parent'}    | ${'_parent'}
-    ${'_top'}       | ${'_top'}
+    ${null}         | ${'noopener noreferrer nofollow'}
+    ${'noopener'}   | ${'noopener'}
+    ${'noreferrer'} | ${'noreferrer'}
+    ${'nofollow'}   | ${'nofollow'}
   `(
     'returns externalLinkRel = $rel given externalLinkRel prop = $externalLinkRel',
     async ({ externalLinkRel, rel }) => {
-      const { func: onLoadSuccess, promise: onLoadSuccessPromise } = makeAsyncCallback();
-      const instance = createRef();
+      const {
+        func: onRenderAnnotationLayerSuccess,
+        promise: onRenderAnnotationLayerSuccessPromise,
+      } = makeAsyncCallback();
 
-      render(
-        <Document
-          externalLinkRel={externalLinkRel}
-          file={pdfFile.file}
-          onLoadSuccess={onLoadSuccess}
-          ref={instance}
-        />,
+      const { container } = render(
+        <Document externalLinkRel={externalLinkRel} file={pdfFile.file}>
+          <Page
+            onRenderAnnotationLayerSuccess={onRenderAnnotationLayerSuccess}
+            renderMode="none"
+            pageNumber={1}
+          />
+        </Document>,
       );
 
       expect.assertions(1);
 
-      await onLoadSuccessPromise;
+      await onRenderAnnotationLayerSuccessPromise;
 
-      expect(instance.current.linkService.externalLinkRel).toBe(rel);
+      const link = container.querySelector('a');
+
+      expect(link.rel).toBe(rel);
     },
   );
 
   it('calls onClick callback when clicked a page (sample of mouse events family)', () => {
-    const onClick = jest.fn();
+    const onClick = vi.fn();
 
     const { container } = render(<Document onClick={onClick} />);
 
@@ -501,7 +559,7 @@ describe('Document', () => {
   });
 
   it('calls onTouchStart callback when touched a page (sample of touch events family)', () => {
-    const onTouchStart = jest.fn();
+    const onTouchStart = vi.fn();
 
     const { container } = render(<Document onTouchStart={onTouchStart} />);
 

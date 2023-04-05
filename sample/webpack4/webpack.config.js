@@ -1,5 +1,5 @@
 const webpack = require('webpack');
-const path = require('path');
+const path = require('node:path');
 
 const CopyWebpackPlugin = require('copy-webpack-plugin');
 const HtmlWebpackPlugin = require('html-webpack-plugin');
@@ -30,10 +30,6 @@ module.exports = {
       {
         test: /\.jsx?$/,
         use: ['babel-loader'],
-      },
-      {
-        test: /\.less$/,
-        use: ['style-loader', 'css-loader', 'less-loader'],
       },
       {
         test: /\.css$/,

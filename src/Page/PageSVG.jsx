@@ -1,76 +1,111 @@
-import React, { PureComponent } from 'react';
-import PropTypes from 'prop-types';
+import React, { useContext, useEffect, useMemo, useState } from 'react';
+import makeCancellable from 'make-cancellable-promise';
+import invariant from 'tiny-invariant';
 import warning from 'tiny-warning';
-import * as pdfjs from 'pdfjs-dist/build/pdf';
+import pdfjs from 'pdfjs-dist';
 
 import PageContext from '../PageContext';
 
-import { isCancelException, makePageCallback } from '../shared/utils';
+import { cancelRunningTask, isCancelException, makePageCallback } from '../shared/utils';
 
-import { isPage, isRotate } from '../shared/propTypes';
+export default function PageSVG() {
+  const context = useContext(PageContext);
 
-export class PageSVGInternal extends PureComponent {
-  state = {
-    svg: null,
-  };
+  invariant(context, 'Unable to find Page context.');
 
-  componentDidMount() {
-    this.renderSVG();
+  const {
+    onRenderSuccess: onRenderSuccessProps,
+    onRenderError: onRenderErrorProps,
+    page,
+    rotate,
+    scale,
+  } = context;
+
+  const [svg, setSvg] = useState(undefined);
+  const [svgError, setSvgError] = useState(undefined);
+
+  invariant(page, 'Attempted to render page SVG, but no page was specified.');
+
+  /**
+   * Called when a page is rendered successfully
+   */
+  function onRenderSuccess() {
+    if (onRenderSuccessProps) {
+      onRenderSuccessProps(makePageCallback(page, scale));
+    }
   }
 
   /**
-   * Called when a page is rendered successfully.
+   * Called when a page fails to render
    */
-  onRenderSuccess = () => {
-    this.renderer = null;
-
-    const { onRenderSuccess, page, scale } = this.props;
-
-    if (onRenderSuccess) onRenderSuccess(makePageCallback(page, scale));
-  };
-
-  /**
-   * Called when a page fails to render.
-   */
-  onRenderError = (error) => {
-    if (isCancelException(error)) {
+  function onRenderError() {
+    if (isCancelException(svgError)) {
       return;
     }
 
-    warning(error);
+    warning(false, svgError);
 
-    const { onRenderError } = this.props;
-
-    if (onRenderError) onRenderError(error);
-  };
-
-  get viewport() {
-    const { page, rotate, scale } = this.props;
-
-    return page.getViewport({ scale, rotation: rotate });
+    if (onRenderErrorProps) {
+      onRenderErrorProps(svgError);
+    }
   }
 
-  renderSVG = () => {
-    const { page } = this.props;
+  const viewport = useMemo(
+    () => page.getViewport({ scale, rotation: rotate }),
+    [page, rotate, scale],
+  );
 
-    this.renderer = page.getOperatorList();
+  function resetSVG() {
+    setSvg(undefined);
+    setSvgError(undefined);
+  }
 
-    return this.renderer
+  useEffect(resetSVG, [page, viewport]);
+
+  function renderSVG() {
+    const cancellable = makeCancellable(page.getOperatorList());
+
+    cancellable.promise
       .then((operatorList) => {
         const svgGfx = new pdfjs.SVGGraphics(page.commonObjs, page.objs);
-        this.renderer = svgGfx
-          .getSVG(operatorList, this.viewport)
-          .then((svg) => {
-            this.setState({ svg }, this.onRenderSuccess);
-          })
-          .catch(this.onRenderError);
+
+        svgGfx
+          .getSVG(operatorList, viewport)
+          .then(setSvg)
+          .catch((error) => {
+            setSvg(false);
+            setSvgError(error);
+          });
       })
-      .catch(this.onRenderError);
-  };
+      .catch((error) => {
+        setSvg(false);
+        setSvgError(error);
+      });
 
-  drawPageOnContainer = (element) => {
-    const { svg } = this.state;
+    return () => cancelRunningTask(cancellable);
+  }
 
+  useEffect(renderSVG, [page, viewport]);
+
+  useEffect(
+    () => {
+      if (svg === undefined) {
+        return;
+      }
+
+      if (svg === false) {
+        onRenderError();
+        return;
+      }
+
+      onRenderSuccess();
+    },
+    // Ommitted callbacks so they are not called every time they change
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [svg],
+  );
+
+  function drawPageOnContainer(element) {
     if (!element || !svg) {
       return;
     }
@@ -80,44 +115,27 @@ export class PageSVGInternal extends PureComponent {
       element.appendChild(svg);
     }
 
-    const { width, height } = this.viewport;
+    const { width, height } = viewport;
+
     svg.setAttribute('width', width);
     svg.setAttribute('height', height);
-  };
-
-  render() {
-    const { width, height } = this.viewport;
-
-    return (
-      <div
-        className="react-pdf__Page__svg"
-        // Note: This cannot be shortened, as we need this function to be called with each render.
-        ref={(ref) => this.drawPageOnContainer(ref)}
-        style={{
-          display: 'block',
-          backgroundColor: 'white',
-          overflow: 'hidden',
-          width,
-          height,
-          userSelect: 'none',
-        }}
-      />
-    );
   }
-}
 
-PageSVGInternal.propTypes = {
-  onRenderError: PropTypes.func,
-  onRenderSuccess: PropTypes.func,
-  page: isPage.isRequired,
-  rotate: isRotate,
-  scale: PropTypes.number.isRequired,
-};
+  const { width, height } = viewport;
 
-export default function PageSVG(props) {
   return (
-    <PageContext.Consumer>
-      {(context) => <PageSVGInternal {...context} {...props} />}
-    </PageContext.Consumer>
+    <div
+      className="react-pdf__Page__svg"
+      // Note: This cannot be shortened, as we need this function to be called with each render.
+      ref={(ref) => drawPageOnContainer(ref)}
+      style={{
+        display: 'block',
+        backgroundColor: 'white',
+        overflow: 'hidden',
+        width,
+        height,
+        userSelect: 'none',
+      }}
+    />
   );
 }

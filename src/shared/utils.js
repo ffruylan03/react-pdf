@@ -4,7 +4,7 @@ import warning from 'tiny-warning';
 /**
  * Checks if we're running in a browser environment.
  */
-export const isBrowser = typeof window !== 'undefined';
+export const isBrowser = typeof document !== 'undefined';
 
 /**
  * Checks whether we're running from a local file system.
@@ -30,7 +30,7 @@ export function isProvided(variable) {
 }
 
 /**
- * Checkes whether a variable provided is a string.
+ * Checks whether a variable provided is a string.
  *
  * @param {*} variable Variable to check
  */
@@ -48,7 +48,7 @@ export function isArrayBuffer(variable) {
 }
 
 /**
- * Checkes whether a variable provided is a Blob.
+ * Checks whether a variable provided is a Blob.
  *
  * @param {*} variable Variable to check
  */
@@ -56,17 +56,6 @@ export function isBlob(variable) {
   invariant(isBrowser, 'isBlob can only be used in a browser environment');
 
   return variable instanceof Blob;
-}
-
-/**
- * Checkes whether a variable provided is a File.
- *
- * @param {*} variable Variable to check
- */
-export function isFile(variable) {
-  invariant(isBrowser, 'isFile can only be used in a browser environment');
-
-  return variable instanceof File;
 }
 
 /**
@@ -91,7 +80,7 @@ export function dataURItoByteString(dataURI) {
   return unescape(dataString);
 }
 
-export function getPixelRatio() {
+export function getDevicePixelRatio() {
   return (isBrowser && window.devicePixelRatio) || 1;
 }
 
@@ -152,23 +141,29 @@ export function loadFromFile(file) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
 
-    reader.onload = () => resolve(new Uint8Array(reader.result));
+    reader.onload = () => {
+      resolve(reader.result);
+    };
+
     reader.onerror = (event) => {
-      switch (event.target.error.code) {
-        case event.target.error.NOT_FOUND_ERR:
+      if (!event.target) {
+        return reject(new Error('Error while reading a file.'));
+      }
+
+      const { error } = event.target;
+
+      switch (error.code) {
+        case error.NOT_FOUND_ERR:
           return reject(new Error('Error while reading a file: File not found.'));
-        case event.target.error.NOT_READABLE_ERR:
-          return reject(new Error('Error while reading a file: File not readable.'));
-        case event.target.error.SECURITY_ERR:
+        case error.SECURITY_ERR:
           return reject(new Error('Error while reading a file: Security error.'));
-        case event.target.error.ABORT_ERR:
+        case error.ABORT_ERR:
           return reject(new Error('Error while reading a file: Aborted.'));
         default:
           return reject(new Error('Error while reading a file.'));
       }
     };
-    reader.readAsArrayBuffer(file);
 
-    return null;
+    reader.readAsArrayBuffer(file);
   });
 }

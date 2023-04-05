@@ -1,15 +1,30 @@
+import { beforeAll, describe, expect, it, vi } from 'vitest';
 import React from 'react';
 import { render } from '@testing-library/react';
 
-import { pdfjs } from '../entry.jest';
+import { pdfjs } from '../index.test';
 
-import { TextLayerInternal as TextLayer } from './TextLayer';
+import TextLayer from './TextLayer';
 
 import failingPage from '../../__mocks__/_failing_page';
 
 import { loadPDF, makeAsyncCallback, muteConsole, restoreConsole } from '../../test-utils';
 
+import PageContext from '../PageContext';
+
 const pdfFile = loadPDF('./__mocks__/_pdf.pdf');
+
+function renderWithContext(children, context) {
+  const { rerender, ...otherResult } = render(
+    <PageContext.Provider value={context}>{children}</PageContext.Provider>,
+  );
+
+  return {
+    ...otherResult,
+    rerender: (nextChildren, nextContext = context) =>
+      rerender(<PageContext.Provider value={nextContext}>{nextChildren}</PageContext.Provider>),
+  };
+}
 
 describe('TextLayer', () => {
   // Loaded page
@@ -36,9 +51,13 @@ describe('TextLayer', () => {
     it('loads text content and calls onGetTextSuccess callback properly', async () => {
       const { func: onGetTextSuccess, promise: onGetTextSuccessPromise } = makeAsyncCallback();
 
-      render(<TextLayer onGetTextSuccess={onGetTextSuccess} page={page} />);
+      renderWithContext(<TextLayer />, {
+        onGetTextSuccess,
+        page,
+      });
 
       expect.assertions(1);
+
       await expect(onGetTextSuccessPromise).resolves.toMatchObject({ items: desiredTextItems });
     });
 
@@ -47,9 +66,13 @@ describe('TextLayer', () => {
 
       muteConsole();
 
-      render(<TextLayer onGetTextError={onGetTextError} page={failingPage} />);
+      renderWithContext(<TextLayer />, {
+        onGetTextError,
+        page: failingPage,
+      });
 
       expect.assertions(1);
+
       await expect(onGetTextErrorPromise).resolves.toBeInstanceOf(Error);
 
       restoreConsole();
@@ -58,16 +81,23 @@ describe('TextLayer', () => {
     it('replaces text content properly', async () => {
       const { func: onGetTextSuccess, promise: onGetTextSuccessPromise } = makeAsyncCallback();
 
-      const { rerender } = render(<TextLayer onGetTextSuccess={onGetTextSuccess} page={page} />);
+      const { rerender } = renderWithContext(<TextLayer />, {
+        onGetTextSuccess,
+        page,
+      });
 
       expect.assertions(2);
+
       await expect(onGetTextSuccessPromise).resolves.toMatchObject({
         items: desiredTextItems,
       });
 
       const { func: onGetTextSuccess2, promise: onGetTextSuccessPromise2 } = makeAsyncCallback();
 
-      rerender(<TextLayer onGetTextSuccess={onGetTextSuccess2} page={page2} />);
+      rerender(<TextLayer />, {
+        onGetTextSuccess: onGetTextSuccess2,
+        page: page2,
+      });
 
       await expect(onGetTextSuccessPromise2).resolves.toMatchObject({
         items: desiredTextItems2,
@@ -76,7 +106,9 @@ describe('TextLayer', () => {
 
     it('throws an error when placed outside Page', () => {
       muteConsole();
+
       expect(() => render(<TextLayer />)).toThrow();
+
       restoreConsole();
     });
   });
@@ -86,62 +118,117 @@ describe('TextLayer', () => {
       const { func: onRenderTextLayerSuccess, promise: onRenderTextLayerSuccessPromise } =
         makeAsyncCallback();
 
-      const { container } = render(
-        <TextLayer onRenderTextLayerSuccess={onRenderTextLayerSuccess} page={page} />,
-      );
+      const { container } = renderWithContext(<TextLayer />, { onRenderTextLayerSuccess, page });
 
       expect.assertions(1);
-      return onRenderTextLayerSuccessPromise.then(() => {
-        const textItems = [...container.firstChild.children];
 
-        expect(textItems).toHaveLength(desiredTextItems.length);
-      });
+      await onRenderTextLayerSuccessPromise;
+
+      const textItems = [...container.firstElementChild.children];
+
+      expect(textItems).toHaveLength(desiredTextItems.length + 1);
     });
 
-    it('calls customTextRenderer with necessary arguments', () => {
+    it('renders text content properly given customTextRenderer', async () => {
       const { func: onRenderTextLayerSuccess, promise: onRenderTextLayerSuccessPromise } =
         makeAsyncCallback();
 
-      const customTextRenderer = jest.fn();
+      const customTextRenderer = vi.fn();
 
-      render(
-        <TextLayer
-          customTextRenderer={customTextRenderer}
-          onRenderTextLayerSuccess={onRenderTextLayerSuccess}
-          page={page}
-        />,
-      );
-
-      expect.assertions(2);
-      return onRenderTextLayerSuccessPromise.then(() => {
-        expect(customTextRenderer).toHaveBeenCalledTimes(desiredTextItems.length);
-        expect(customTextRenderer).toHaveBeenCalledWith(
-          expect.objectContaining({
-            str: expect.any(String),
-            itemIndex: expect.any(Number),
-          }),
-        );
+      const { container } = renderWithContext(<TextLayer />, {
+        customTextRenderer,
+        onRenderTextLayerSuccess,
+        page,
       });
+
+      expect.assertions(1);
+
+      await onRenderTextLayerSuccessPromise;
+
+      const textItems = [...container.firstElementChild.children];
+
+      expect(textItems).toHaveLength(desiredTextItems.length + 1);
     });
 
-    it('renders text content properly given customTextRenderer', () => {
+    it('maps textContent items to actual TextLayer children properly', async () => {
+      const { func: onRenderTextLayerSuccess, promise: onRenderTextLayerSuccessPromise } =
+        makeAsyncCallback();
+
+      const { container, rerender } = renderWithContext(<TextLayer />, {
+        onRenderTextLayerSuccess,
+        page,
+      });
+
+      expect.assertions(1);
+
+      await onRenderTextLayerSuccessPromise;
+
+      const innerHTML = container.firstElementChild.innerHTML;
+
+      const { func: onRenderTextLayerSuccess2, promise: onRenderTextLayerSuccessPromise2 } =
+        makeAsyncCallback();
+
+      const customTextRenderer = (item) => item.str;
+
+      rerender(<TextLayer />, {
+        customTextRenderer,
+        onRenderTextLayerSuccess: onRenderTextLayerSuccess2,
+        page,
+      });
+
+      await onRenderTextLayerSuccessPromise2;
+
+      const innerHTML2 = container.firstElementChild.innerHTML;
+
+      expect(innerHTML).toEqual(innerHTML2);
+    });
+
+    it('calls customTextRenderer with necessary arguments', async () => {
+      const { func: onRenderTextLayerSuccess, promise: onRenderTextLayerSuccessPromise } =
+        makeAsyncCallback();
+
+      const customTextRenderer = vi.fn();
+
+      const { container } = renderWithContext(<TextLayer />, {
+        customTextRenderer,
+        onRenderTextLayerSuccess,
+        page,
+      });
+
+      expect.assertions(3);
+
+      await onRenderTextLayerSuccessPromise;
+
+      const textItems = [...container.firstElementChild.children];
+
+      expect(textItems).toHaveLength(desiredTextItems.length + 1);
+
+      expect(customTextRenderer).toHaveBeenCalledTimes(desiredTextItems.length);
+      expect(customTextRenderer).toHaveBeenCalledWith(
+        expect.objectContaining({
+          str: expect.any(String),
+          itemIndex: expect.any(Number),
+        }),
+      );
+    });
+
+    it('renders text content properly given customTextRenderer', async () => {
       const { func: onRenderTextLayerSuccess, promise: onRenderTextLayerSuccessPromise } =
         makeAsyncCallback();
 
       const customTextRenderer = () => 'Test value';
 
-      const { container } = render(
-        <TextLayer
-          customTextRenderer={customTextRenderer}
-          onRenderTextLayerSuccess={onRenderTextLayerSuccess}
-          page={page}
-        />,
-      );
+      const { container } = renderWithContext(<TextLayer />, {
+        customTextRenderer,
+        onRenderTextLayerSuccess,
+        page,
+      });
 
       expect.assertions(1);
-      return onRenderTextLayerSuccessPromise.then(() => {
-        expect(container).toHaveTextContent('Test value');
-      });
+
+      await onRenderTextLayerSuccessPromise;
+
+      expect(container).toHaveTextContent('Test value');
     });
   });
 });

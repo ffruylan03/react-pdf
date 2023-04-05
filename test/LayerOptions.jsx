@@ -5,9 +5,11 @@ export default function LayerOptions({
   renderAnnotationLayer,
   renderForms,
   renderTextLayer,
+  useCustomTextRenderer,
   setRenderAnnotationLayer,
   setRenderForms,
   setRenderTextLayer,
+  setUseCustomTextRenderer,
 }) {
   function onRenderAnnotationLayerChange(event) {
     setRenderAnnotationLayer(event.target.checked);
@@ -21,9 +23,13 @@ export default function LayerOptions({
     setRenderTextLayer(event.target.checked);
   }
 
+  function onUseCustomTextRendererChange(event) {
+    setUseCustomTextRenderer(event.target.checked);
+  }
+
   return (
-    <fieldset id="layeroptions">
-      <legend htmlFor="layeroptions">Layer options</legend>
+    <fieldset>
+      <legend>Layer options</legend>
 
       <div>
         <input
@@ -33,6 +39,17 @@ export default function LayerOptions({
           type="checkbox"
         />
         <label htmlFor="renderTextLayer">Render text layer</label>
+      </div>
+
+      <div>
+        <input
+          checked={renderTextLayer ? useCustomTextRenderer : false}
+          disabled={!renderTextLayer}
+          id="useCustomTextRenderer"
+          onChange={onUseCustomTextRendererChange}
+          type="checkbox"
+        />
+        <label htmlFor="useCustomTextRenderer">Use custom text renderer</label>
       </div>
 
       <div>
@@ -47,7 +64,7 @@ export default function LayerOptions({
 
       <div>
         <input
-          checked={renderAnnotationLayer && renderForms}
+          checked={renderAnnotationLayer ? renderForms : null}
           disabled={!renderAnnotationLayer}
           id="renderForms"
           onChange={onRenderFormsChange}
@@ -63,7 +80,9 @@ LayerOptions.propTypes = {
   renderAnnotationLayer: PropTypes.bool,
   renderForms: PropTypes.bool,
   renderTextLayer: PropTypes.bool,
+  useCustomTextRenderer: PropTypes.bool,
   setRenderAnnotationLayer: PropTypes.func.isRequired,
   setRenderForms: PropTypes.func.isRequired,
   setRenderTextLayer: PropTypes.func.isRequired,
+  setUseCustomTextRenderer: PropTypes.func.isRequired,
 };

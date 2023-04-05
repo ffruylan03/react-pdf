@@ -1,5 +1,6 @@
-import React, { PureComponent } from 'react';
+import React, { useContext, useRef } from 'react';
 import PropTypes from 'prop-types';
+import invariant from 'tiny-invariant';
 
 import DocumentContext from './DocumentContext';
 import OutlineContext from './OutlineContext';
@@ -8,86 +9,82 @@ import Ref from './Ref';
 
 import { isDefined } from './shared/utils';
 
-import { isPdf } from './shared/propTypes';
+function useCachedValue(getter) {
+  const ref = useRef();
 
-export class OutlineItemInternal extends PureComponent {
-  getDestination = () =>
-    new Promise((resolve, reject) => {
-      const { item, pdf } = this.props;
+  if (isDefined(ref.current)) {
+    return () => ref.current;
+  }
 
-      if (!isDefined(this.destination)) {
-        if (typeof item.dest === 'string') {
-          pdf.getDestination(item.dest).then(resolve).catch(reject);
-        } else {
-          resolve(item.dest);
-        }
-      }
+  return () => {
+    const value = getter();
 
-      return this.destination;
-    }).then((destination) => {
-      this.destination = destination;
-      return destination;
-    });
+    ref.current = value;
 
-  getPageIndex = () =>
-    new Promise((resolve, reject) => {
-      const { pdf } = this.props;
-      if (isDefined(this.pageIndex)) {
-        resolve(this.pageIndex);
-      }
+    return value;
+  };
+}
 
-      this.getDestination().then((destination) => {
-        if (!destination) {
-          return;
-        }
+export default function OutlineItem(props) {
+  const documentContext = useContext(DocumentContext);
 
-        const [ref] = destination;
-        pdf.getPageIndex(new Ref(ref)).then(resolve).catch(reject);
-      });
-    }).then((pageIndex) => {
-      this.pageIndex = pageIndex;
-      return this.pageIndex;
-    });
+  invariant(
+    documentContext,
+    'Unable to find Document context. Did you wrap <Outline /> in <Document />?',
+  );
 
-  getPageNumber = () =>
-    new Promise((resolve, reject) => {
-      if (isDefined(this.pageNumber)) {
-        resolve(this.pageNumber);
-      }
+  const outlineContext = useContext(OutlineContext);
 
-      this.getPageIndex()
-        .then((pageIndex) => {
-          resolve(pageIndex + 1);
-        })
-        .catch(reject);
-    }).then((pageNumber) => {
-      this.pageNumber = pageNumber;
-      return pageNumber;
-    });
+  invariant(outlineContext, 'Unable to find Outline context.');
 
-  onClick = (event) => {
-    const { onClick } = this.props;
+  const mergedProps = { ...documentContext, ...outlineContext, ...props };
+  const { item, onClick: onClickProps, pdf, ...otherProps } = mergedProps;
 
+  const getDestination = useCachedValue(() => {
+    if (typeof item.dest === 'string') {
+      return pdf.getDestination(item.dest);
+    }
+
+    return item.dest;
+  });
+
+  const getPageIndex = useCachedValue(async () => {
+    const destination = await getDestination();
+
+    if (!destination) {
+      return;
+    }
+
+    const [ref] = destination;
+
+    return pdf.getPageIndex(new Ref(ref));
+  });
+
+  const getPageNumber = useCachedValue(async () => {
+    const pageIndex = await getPageIndex();
+
+    return pageIndex + 1;
+  });
+
+  function onClick(event) {
     event.preventDefault();
 
-    if (!onClick) {
+    if (!onClickProps) {
       return false;
     }
 
-    return Promise.all([this.getDestination(), this.getPageIndex(), this.getPageNumber()]).then(
+    return Promise.all([getDestination(), getPageIndex(), getPageNumber()]).then(
       ([dest, pageIndex, pageNumber]) => {
-        onClick({
+        onClickProps({
           dest,
           pageIndex,
           pageNumber,
         });
       },
     );
-  };
+  }
 
-  renderSubitems() {
-    const { item, ...otherProps } = this.props;
-
+  function renderSubitems() {
     if (!item.items || !item.items.length) {
       return null;
     }
@@ -97,7 +94,7 @@ export class OutlineItemInternal extends PureComponent {
     return (
       <ul>
         {subitems.map((subitem, subitemIndex) => (
-          <OutlineItemInternal
+          <OutlineItem
             key={typeof subitem.destination === 'string' ? subitem.destination : subitemIndex}
             item={subitem}
             {...otherProps}
@@ -107,24 +104,20 @@ export class OutlineItemInternal extends PureComponent {
     );
   }
 
-  render() {
-    const { item } = this.props;
-
-    return (
-      <li>
-        {/* eslint-disable-next-line jsx-a11y/anchor-is-valid */}
-        <a href="#" onClick={this.onClick}>
-          {item.title}
-        </a>
-        {this.renderSubitems()}
-      </li>
-    );
-  }
+  return (
+    <li>
+      {/* eslint-disable-next-line jsx-a11y/anchor-is-valid */}
+      <a href="#" onClick={onClick}>
+        {item.title}
+      </a>
+      {renderSubitems()}
+    </li>
+  );
 }
 
 const isDestination = PropTypes.oneOfType([PropTypes.string, PropTypes.arrayOf(PropTypes.any)]);
 
-OutlineItemInternal.propTypes = {
+OutlineItem.propTypes = {
   item: PropTypes.shape({
     dest: isDestination,
     items: PropTypes.arrayOf(
@@ -135,20 +128,4 @@ OutlineItemInternal.propTypes = {
     ),
     title: PropTypes.string,
   }).isRequired,
-  onClick: PropTypes.func,
-  pdf: isPdf.isRequired,
 };
-
-const OutlineItem = (props) => (
-  <DocumentContext.Consumer>
-    {(documentContext) => (
-      <OutlineContext.Consumer>
-        {(outlineContext) => (
-          <OutlineItemInternal {...documentContext} {...outlineContext} {...props} />
-        )}
-      </OutlineContext.Consumer>
-    )}
-  </DocumentContext.Consumer>
-);
-
-export default OutlineItem;

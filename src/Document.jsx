@@ -1,14 +1,22 @@
 /**
  * Loads a PDF document. Passes it to all children.
  */
-import React, { PureComponent } from 'react';
+import React, {
+  forwardRef,
+  useCallback,
+  useEffect,
+  useImperativeHandle,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import PropTypes from 'prop-types';
 import makeEventProps from 'make-event-props';
 import makeCancellable from 'make-cancellable-promise';
-import mergeClassNames from 'merge-class-names';
+import clsx from 'clsx';
 import invariant from 'tiny-invariant';
 import warning from 'tiny-warning';
-import * as pdfjs from 'pdfjs-dist/build/pdf';
+import pdfjs from 'pdfjs-dist';
 
 import DocumentContext from './DocumentContext';
 
@@ -25,24 +33,69 @@ import {
   isBlob,
   isBrowser,
   isDataURI,
-  isFile,
   loadFromFile,
 } from './shared/utils';
 
-import { eventProps, isClassName, isFile as isFileProp, isRef } from './shared/propTypes';
+import { eventProps, isClassName, isFile, isRef } from './shared/propTypes';
 
 const { PDFDataRangeTransport } = pdfjs;
 
-export default class Document extends PureComponent {
-  state = {
-    pdf: null,
-  };
+const defaultOnPassword = (callback, reason) => {
+  switch (reason) {
+    case PasswordResponses.NEED_PASSWORD: {
+      // eslint-disable-next-line no-alert
+      const password = prompt('Enter the password to open this PDF file.');
+      callback(password);
+      break;
+    }
+    case PasswordResponses.INCORRECT_PASSWORD: {
+      // eslint-disable-next-line no-alert
+      const password = prompt('Invalid password. Please try again.');
+      callback(password);
+      break;
+    }
+    default:
+  }
+};
 
-  viewer = {
+const Document = forwardRef(function Document(
+  {
+    children,
+    className,
+    error = 'Failed to load PDF file.',
+    externalLinkRel,
+    externalLinkTarget,
+    file,
+    inputRef,
+    imageResourcesPath,
+    loading = 'Loading PDF…',
+    noData = 'No PDF file specified.',
+    onItemClick,
+    onLoadError: onLoadErrorProps,
+    onLoadProgress,
+    onLoadSuccess: onLoadSuccessProps,
+    onPassword = defaultOnPassword,
+    onSourceError: onSourceErrorProps,
+    onSourceSuccess: onSourceSuccessProps,
+    options,
+    renderMode,
+    rotate,
+    ...otherProps
+  },
+  ref,
+) {
+  const [source, setSource] = useState(undefined);
+  const [sourceError, setSourceError] = useState(undefined);
+  const [pdf, setPdf] = useState(undefined);
+  const [pdfError, setPdfError] = useState(undefined);
+
+  const linkService = useRef(new LinkService());
+
+  const pages = useRef([]);
+
+  const viewer = useRef({
+    // Handling jumping to internal links target
     scrollPageIntoView: ({ dest, pageIndex, pageNumber }) => {
-      // Handling jumping to internal links target
-      const { onItemClick } = this.props;
-
       // First, check if custom handling of onItemClick was provided
       if (onItemClick) {
         onItemClick({ dest, pageIndex, pageNumber });
@@ -50,7 +103,7 @@ export default class Document extends PureComponent {
       }
 
       // If not, try to look for target page within the <Document>.
-      const page = this.pages[pageIndex];
+      const page = pages.current[pageIndex];
 
       if (page) {
         // Scroll to the page automatically
@@ -63,310 +116,275 @@ export default class Document extends PureComponent {
         `An internal link leading to page ${pageNumber} was clicked, but neither <Document> was provided with onItemClick nor it was able to find the page within itself. Either provide onItemClick to <Document> and handle navigating by yourself or ensure that all pages are rendered within <Document>.`,
       );
     },
-  };
+  });
 
-  linkService = new LinkService();
-
-  componentDidMount() {
-    this.loadDocument();
-    this.setupLinkService();
-  }
-
-  componentDidUpdate(prevProps) {
-    const { file } = this.props;
-    if (file !== prevProps.file) {
-      this.loadDocument();
-    }
-  }
-
-  componentWillUnmount() {
-    // If rendering is in progress, let's cancel it
-    cancelRunningTask(this.runningTask);
-
-    // If loading is in progress, let's destroy it
-    if (this.loadingTask) this.loadingTask.destroy();
-  }
-
-  loadDocument = () => {
-    // If another rendering is in progress, let's cancel it
-    cancelRunningTask(this.runningTask);
-
-    // If another loading is in progress, let's destroy it
-    if (this.loadingTask) this.loadingTask.destroy();
-
-    const cancellable = makeCancellable(this.findDocumentSource());
-    this.runningTask = cancellable;
-
-    cancellable.promise
-      .then((source) => {
-        this.onSourceSuccess();
-
-        if (!source) {
-          return;
-        }
-
-        this.setState((prevState) => {
-          if (!prevState.pdf) {
-            return null;
-          }
-
-          return { pdf: null };
-        });
-
-        const { options, onLoadProgress, onPassword } = this.props;
-
-        this.loadingTask = pdfjs.getDocument({ ...source, ...options });
-        this.loadingTask.onPassword = onPassword;
-        if (onLoadProgress) {
-          this.loadingTask.onProgress = onLoadProgress;
-        }
-        const cancellable = makeCancellable(this.loadingTask.promise);
-        this.runningTask = cancellable;
-
-        cancellable.promise
-          .then((pdf) => {
-            this.setState((prevState) => {
-              if (prevState.pdf && prevState.pdf.fingerprint === pdf.fingerprint) {
-                return null;
-              }
-
-              return { pdf };
-            }, this.onLoadSuccess);
-          })
-          .catch((error) => {
-            this.onLoadError(error);
-          });
-      })
-      .catch((error) => {
-        this.onSourceError(error);
-      });
-  };
-
-  setupLinkService = () => {
-    const { externalLinkRel, externalLinkTarget } = this.props;
-
-    this.linkService.setViewer(this.viewer);
-    this.linkService.setExternalLinkRel(externalLinkRel);
-    this.linkService.setExternalLinkTarget(externalLinkTarget);
-  };
-
-  get childContext() {
-    const { linkService, registerPage, unregisterPage } = this;
-    const { imageResourcesPath, renderMode, rotate } = this.props;
-    const { pdf } = this.state;
-
-    return {
-      imageResourcesPath,
-      linkService,
-      pdf,
-      registerPage,
-      renderMode,
-      rotate,
-      unregisterPage,
-    };
-  }
-
-  get eventProps() {
-    return makeEventProps(this.props, () => this.state.pdf);
-  }
+  useImperativeHandle(
+    ref,
+    () => {
+      return {
+        linkService,
+        pages,
+        viewer,
+      };
+    },
+    [],
+  );
 
   /**
    * Called when a document source is resolved correctly
    */
-  onSourceSuccess = () => {
-    const { onSourceSuccess } = this.props;
-
-    if (onSourceSuccess) onSourceSuccess();
-  };
+  function onSourceSuccess() {
+    if (onSourceSuccessProps) {
+      onSourceSuccessProps();
+    }
+  }
 
   /**
    * Called when a document source failed to be resolved correctly
    */
-  onSourceError = (error) => {
-    warning(error);
+  function onSourceError() {
+    warning(false, sourceError);
 
-    const { onSourceError } = this.props;
+    if (onSourceErrorProps) {
+      onSourceErrorProps(sourceError);
+    }
+  }
 
-    if (onSourceError) onSourceError(error);
-  };
+  function resetSource() {
+    setSource(undefined);
+    setSourceError(undefined);
+  }
+
+  useEffect(resetSource, [file]);
+
+  const findDocumentSource = useCallback(async () => {
+    if (!file) {
+      return null;
+    }
+
+    // File is a string
+    if (typeof file === 'string') {
+      if (isDataURI(file)) {
+        const fileByteString = dataURItoByteString(file);
+        return { data: fileByteString };
+      }
+
+      displayCORSWarning();
+      return { url: file };
+    }
+
+    // File is PDFDataRangeTransport
+    if (file instanceof PDFDataRangeTransport) {
+      return { range: file };
+    }
+
+    // File is an ArrayBuffer
+    if (isArrayBuffer(file)) {
+      return { data: file };
+    }
+
+    /**
+     * The cases below are browser-only.
+     * If you're running on a non-browser environment, these cases will be of no use.
+     */
+    if (isBrowser) {
+      // File is a Blob
+      if (isBlob(file)) {
+        const data = await loadFromFile(file);
+
+        return { data };
+      }
+    }
+
+    // At this point, file must be an object
+    invariant(
+      typeof file === 'object',
+      'Invalid parameter in file, need either Uint8Array, string or a parameter object',
+    );
+
+    invariant(
+      'data' in file || 'range' in file || 'url' in file,
+      'Invalid parameter object: need either .data, .range or .url',
+    );
+
+    // File .url is a string
+    if ('url' in file && typeof file.url === 'string') {
+      if (isDataURI(file.url)) {
+        const { url, ...otherParams } = file;
+        const fileByteString = dataURItoByteString(url);
+        return { data: fileByteString, ...otherParams };
+      }
+
+      displayCORSWarning();
+    }
+
+    return file;
+  }, [file]);
+
+  useEffect(() => {
+    const cancellable = makeCancellable(findDocumentSource());
+
+    cancellable.promise.then(setSource).catch((error) => {
+      setSource(false);
+      setSourceError(error);
+    });
+
+    return () => {
+      cancelRunningTask(cancellable);
+    };
+  }, [findDocumentSource]);
+
+  useEffect(
+    () => {
+      if (typeof source === 'undefined') {
+        return;
+      }
+
+      if (source || source === null) {
+        onSourceSuccess();
+      } else {
+        onSourceError();
+      }
+    },
+    // Ommitted callbacks so they are not called every time they change
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [source],
+  );
 
   /**
    * Called when a document is read successfully
    */
-  onLoadSuccess = () => {
-    const { onLoadSuccess } = this.props;
-    const { pdf } = this.state;
+  function onLoadSuccess() {
+    if (onLoadSuccessProps) {
+      onLoadSuccessProps(pdf);
+    }
 
-    if (onLoadSuccess) onLoadSuccess(pdf);
-
-    this.pages = new Array(pdf.numPages);
-    this.linkService.setDocument(pdf);
-  };
+    pages.current = new Array(pdf.numPages);
+    linkService.current.setDocument(pdf);
+  }
 
   /**
    * Called when a document failed to read successfully
    */
-  onLoadError = (error) => {
-    this.setState({ pdf: false });
+  function onLoadError() {
+    warning(false, pdfError);
 
-    warning(error);
-
-    const { onLoadError } = this.props;
-
-    if (onLoadError) onLoadError(error);
-  };
-
-  /**
-   * Finds a document source based on props.
-   */
-  findDocumentSource = () =>
-    new Promise((resolve) => {
-      const { file } = this.props;
-
-      if (!file) {
-        resolve(null);
-      }
-
-      // File is a string
-      if (typeof file === 'string') {
-        if (isDataURI(file)) {
-          const fileByteString = dataURItoByteString(file);
-          resolve({ data: fileByteString });
-        }
-
-        displayCORSWarning();
-        resolve({ url: file });
-      }
-
-      // File is PDFDataRangeTransport
-      if (file instanceof PDFDataRangeTransport) {
-        resolve({ range: file });
-      }
-
-      // File is an ArrayBuffer
-      if (isArrayBuffer(file)) {
-        resolve({ data: file });
-      }
-
-      /**
-       * The cases below are browser-only.
-       * If you're running on a non-browser environment, these cases will be of no use.
-       */
-      if (isBrowser) {
-        // File is a Blob
-        if (isBlob(file) || isFile(file)) {
-          loadFromFile(file).then((data) => {
-            resolve({ data });
-          });
-          return;
-        }
-      }
-
-      // At this point, file must be an object
-      invariant(
-        typeof file === 'object',
-        'Invalid parameter in file, need either Uint8Array, string or a parameter object',
-      );
-
-      invariant(
-        file.url || file.data || file.range,
-        'Invalid parameter object: need either .data, .range or .url',
-      );
-
-      // File .url is a string
-      if (typeof file.url === 'string') {
-        if (isDataURI(file.url)) {
-          const { url, ...otherParams } = file;
-          const fileByteString = dataURItoByteString(url);
-          resolve({ data: fileByteString, ...otherParams });
-        }
-
-        displayCORSWarning();
-      }
-
-      resolve(file);
-    });
-
-  registerPage = (pageIndex, ref) => {
-    this.pages[pageIndex] = ref;
-  };
-
-  unregisterPage = (pageIndex) => {
-    delete this.pages[pageIndex];
-  };
-
-  renderChildren() {
-    const { children } = this.props;
-
-    return (
-      <DocumentContext.Provider value={this.childContext}>{children}</DocumentContext.Provider>
-    );
+    if (onLoadErrorProps) {
+      onLoadErrorProps(pdfError);
+    }
   }
 
-  renderContent() {
-    const { file } = this.props;
-    const { pdf } = this.state;
+  function resetDocument() {
+    setPdf(undefined);
+    setPdfError(undefined);
+  }
 
+  useEffect(resetDocument, [source]);
+
+  function loadDocument() {
+    if (!source) {
+      return;
+    }
+
+    const destroyable = pdfjs.getDocument({ ...source, ...options });
+    if (onLoadProgress) {
+      destroyable.onProgress = onLoadProgress;
+    }
+    if (onPassword) {
+      destroyable.onPassword = onPassword;
+    }
+    const loadingTask = destroyable;
+
+    loadingTask.promise.then(setPdf).catch((error) => {
+      setPdf(false);
+      setPdfError(error);
+    });
+
+    return () => {
+      loadingTask.destroy();
+    };
+  }
+
+  useEffect(
+    loadDocument,
+    // Ommitted callbacks so they are not called every time they change
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [options, source],
+  );
+
+  useEffect(
+    () => {
+      if (typeof pdf === 'undefined') {
+        return;
+      }
+
+      if (pdf || pdf === null) {
+        onLoadSuccess();
+      } else {
+        onLoadError();
+      }
+    },
+    // Ommitted callbacks so they are not called every time they change
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [pdf],
+  );
+
+  function setupLinkService() {
+    linkService.current.setViewer(viewer.current);
+    linkService.current.setExternalLinkRel(externalLinkRel);
+    linkService.current.setExternalLinkTarget(externalLinkTarget);
+  }
+
+  useEffect(setupLinkService, [externalLinkRel, externalLinkTarget]);
+
+  function registerPage(pageIndex, ref) {
+    pages.current[pageIndex] = ref;
+  }
+
+  function unregisterPage(pageIndex) {
+    delete pages.current[pageIndex];
+  }
+
+  const childContext = {
+    imageResourcesPath,
+    linkService: linkService.current,
+    pdf,
+    registerPage,
+    renderMode,
+    rotate,
+    unregisterPage,
+  };
+
+  const eventProps = useMemo(() => makeEventProps(otherProps, () => pdf), [otherProps, pdf]);
+
+  function renderChildren() {
+    return <DocumentContext.Provider value={childContext}>{children}</DocumentContext.Provider>;
+  }
+
+  function renderContent() {
     if (!file) {
-      const { noData } = this.props;
-
       return <Message type="no-data">{typeof noData === 'function' ? noData() : noData}</Message>;
     }
 
-    if (pdf === null) {
-      const { loading } = this.props;
-
+    if (pdf === undefined || pdf === null) {
       return (
         <Message type="loading">{typeof loading === 'function' ? loading() : loading}</Message>
       );
     }
 
     if (pdf === false) {
-      const { error } = this.props;
-
       return <Message type="error">{typeof error === 'function' ? error() : error}</Message>;
     }
 
-    return this.renderChildren();
+    return renderChildren();
   }
 
-  render() {
-    const { className, inputRef } = this.props;
-
-    return (
-      <div
-        className={mergeClassNames('react-pdf__Document', className)}
-        ref={inputRef}
-        {...this.eventProps}
-      >
-        {this.renderContent()}
-      </div>
-    );
-  }
-}
-
-Document.defaultProps = {
-  error: 'Failed to load PDF file.',
-  loading: 'Loading PDF…',
-  noData: 'No PDF file specified.',
-  onPassword: (callback, reason) => {
-    switch (reason) {
-      case PasswordResponses.NEED_PASSWORD: {
-        // eslint-disable-next-line no-alert
-        const password = prompt('Enter the password to open this PDF file.');
-        callback(password);
-        break;
-      }
-      case PasswordResponses.INCORRECT_PASSWORD: {
-        // eslint-disable-next-line no-alert
-        const password = prompt('Invalid password. Please try again.');
-        callback(password);
-        break;
-      }
-      default:
-    }
-  },
-};
+  return (
+    <div className={clsx('react-pdf__Document', className)} ref={inputRef} {...eventProps}>
+      {renderContent()}
+    </div>
+  );
+});
 
 const isFunctionOrNode = PropTypes.oneOfType([PropTypes.func, PropTypes.node]);
 
@@ -376,8 +394,8 @@ Document.propTypes = {
   className: isClassName,
   error: isFunctionOrNode,
   externalLinkRel: PropTypes.string,
-  externalLinkTarget: PropTypes.string,
-  file: isFileProp,
+  externalLinkTarget: PropTypes.oneOf(['_self', '_blank', '_parent', '_top']),
+  file: isFile,
   imageResourcesPath: PropTypes.string,
   inputRef: isRef,
   loading: isFunctionOrNode,
@@ -389,5 +407,14 @@ Document.propTypes = {
   onPassword: PropTypes.func,
   onSourceError: PropTypes.func,
   onSourceSuccess: PropTypes.func,
+  options: PropTypes.shape({
+    cMapUrl: PropTypes.string,
+    cMapPacked: PropTypes.bool,
+    httpHeaders: PropTypes.object,
+    standardFontDataUrl: PropTypes.string,
+    withCredentials: PropTypes.bool,
+  }),
   rotate: PropTypes.number,
 };
+
+export default Document;

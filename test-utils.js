@@ -1,21 +1,21 @@
-/* eslint-env jest */
-const fs = require('fs');
+import fs from 'node:fs';
+import { vi } from 'vitest';
 
-export const makeAsyncCallback = (callbackValue) => {
+export function makeAsyncCallback(callbackValue) {
   let promiseResolve;
   const promise = new Promise((resolve) => {
     promiseResolve = resolve;
   });
-  const func = jest.fn(
+  const func = vi.fn(
     callbackValue
       ? () => promiseResolve(callbackValue)
       : (...args) => promiseResolve(args.length === 1 ? args[0] : args),
   );
 
   return { promise, func };
-};
+}
 
-export const loadPDF = (path) => {
+export function loadPDF(path) {
   const raw = fs.readFileSync(path);
   const arrayBuffer = raw.buffer;
 
@@ -32,19 +32,25 @@ export const loadPDF = (path) => {
       return `data:application/pdf;base64,${raw.toString('base64')}`;
     },
     get file() {
-      return new File([arrayBuffer], { type: 'application/pdf' });
+      return new File([arrayBuffer], 'test.pdf', { type: 'application/pdf' });
     },
   };
-};
+}
 
-export const muteConsole = () => {
-  jest.spyOn(global.console, 'log').mockImplementation(() => {});
-  jest.spyOn(global.console, 'error').mockImplementation(() => {});
-  jest.spyOn(global.console, 'warn').mockImplementation(() => {});
-};
+export function muteConsole() {
+  vi.spyOn(global.console, 'log').mockImplementation(() => {
+    // Intentionally empty
+  });
+  vi.spyOn(global.console, 'error').mockImplementation(() => {
+    // Intentionally empty
+  });
+  vi.spyOn(global.console, 'warn').mockImplementation(() => {
+    // Intentionally empty
+  });
+}
 
-export const restoreConsole = () => {
-  global.console.log.mockRestore();
-  global.console.error.mockRestore();
-  global.console.warn.mockRestore();
-};
+export function restoreConsole() {
+  vi.mocked(global.console.log).mockRestore();
+  vi.mocked(global.console.error).mockRestore();
+  vi.mocked(global.console.warn).mockRestore();
+}

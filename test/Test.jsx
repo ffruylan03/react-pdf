@@ -1,12 +1,12 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { PDFDataRangeTransport } from 'pdfjs-dist';
-import { Document, Outline, Page } from 'react-pdf/dist/esm/entry.webpack5';
+import { Document, Outline, Page } from 'react-pdf/src/index.vite';
 import 'react-pdf/src/Page/AnnotationLayer.css';
 import 'react-pdf/src/Page/TextLayer.css';
 
-import { isArrayBuffer, isBlob, isBrowser, isFile, loadFromFile } from 'react-pdf/src/shared/utils';
+import { isArrayBuffer, isBlob, isBrowser, loadFromFile } from 'react-pdf/src/shared/utils';
 
-import './Test.less';
+import './Test.css';
 
 import AnnotationOptions from './AnnotationOptions';
 import LayerOptions from './LayerOptions';
@@ -22,8 +22,8 @@ const options = {
   standardFontDataUrl: 'standard_fonts/',
 };
 
-export const readAsDataURL = (file) =>
-  new Promise((resolve, reject) => {
+export function readAsDataURL(file) {
+  return new Promise((resolve, reject) => {
     const reader = new FileReader();
 
     reader.onload = () => resolve(reader.result);
@@ -45,11 +45,13 @@ export const readAsDataURL = (file) =>
 
     return null;
   });
+}
 
 /* eslint-disable no-console */
 
 export default function Test() {
   const [canvasBackground, setCanvasBackground] = useState(null);
+  const [devicePixelRatio, setDevicePixelRatio] = useState(null);
   const [displayAll, setDisplayAll] = useState(false);
   const [externalLinkTarget, setExternalLinkTarget] = useState(null);
   const [file, setFile] = useState(null);
@@ -65,6 +67,7 @@ export default function Test() {
   const [renderForms, setRenderForms] = useState(true);
   const [renderMode, setRenderMode] = useState('canvas');
   const [renderTextLayer, setRenderTextLayer] = useState(true);
+  const [useCustomTextRenderer, setUseCustomTextRenderer] = useState(true);
   const [rotate, setRotate] = useState(null);
 
   const onDocumentLoadProgress = useCallback((progressData) => {
@@ -146,7 +149,7 @@ export default function Test() {
              */
             if (isBrowser) {
               // File is a Blob
-              if (isBlob(file) || isFile(file)) {
+              if (isBlob(file)) {
                 return { data: await loadFromFile(file) };
               }
             }
@@ -174,6 +177,7 @@ export default function Test() {
     return {
       canvasBackground,
       className: 'custom-classname-page',
+      devicePixelRatio,
       height: pageHeight,
       onClick: (event, page) => console.log('Clicked a page', { event, page }),
       onRenderSuccess: onPageRenderSuccess,
@@ -183,19 +187,9 @@ export default function Test() {
       renderTextLayer,
       scale: pageScale,
       width: pageWidth,
-      customTextRenderer: (textItem) =>
-        textItem.str.split('ipsum').reduce(
-          (strArray, currentValue, currentIndex) =>
-            currentIndex === 0
-              ? [...strArray, currentValue]
-              : [
-                  ...strArray,
-                  // eslint-disable-next-line react/no-array-index-key
-                  <mark key={currentIndex}>ipsum</mark>,
-                  currentValue,
-                ],
-          [],
-        ),
+      customTextRenderer: useCustomTextRenderer
+        ? ({ str }) => str.replace(/ipsum/g, (value) => `<mark>${value}</mark>`)
+        : null,
     };
   }
 
@@ -221,12 +215,15 @@ export default function Test() {
             renderAnnotationLayer={renderAnnotationLayer}
             renderForms={renderForms}
             renderTextLayer={renderTextLayer}
+            useCustomTextRenderer={useCustomTextRenderer}
             setRenderAnnotationLayer={setRenderAnnotationLayer}
             setRenderForms={setRenderForms}
             setRenderTextLayer={setRenderTextLayer}
+            setUseCustomTextRenderer={setUseCustomTextRenderer}
           />
           <ViewOptions
             canvasBackground={canvasBackground}
+            devicePixelRatio={devicePixelRatio}
             displayAll={displayAll}
             pageHeight={pageHeight}
             pageScale={pageScale}
@@ -234,6 +231,7 @@ export default function Test() {
             renderMode={renderMode}
             rotate={rotate}
             setCanvasBackground={setCanvasBackground}
+            setDevicePixelRatio={setDevicePixelRatio}
             setDisplayAll={setDisplayAll}
             setPageHeight={setPageHeight}
             setPageScale={setPageScale}
@@ -258,11 +256,13 @@ export default function Test() {
             onSourceError={onDocumentLoadError}
           >
             <div className="Test__container__content__toc">
-              {render && <Outline className="custom-classname-outline" onItemClick={onItemClick} />}
+              {render ? (
+                <Outline className="custom-classname-outline" onItemClick={onItemClick} />
+              ) : null}
             </div>
             <div className="Test__container__content__document">
-              {render &&
-                (displayAll ? (
+              {render ? (
+                displayAll ? (
                   Array.from(new Array(numPages), (el, index) => (
                     <Page
                       {...pageProps}
@@ -275,7 +275,8 @@ export default function Test() {
                   ))
                 ) : (
                   <Page {...pageProps} pageNumber={pageNumber || 1} />
-                ))}
+                )
+              ) : null}
             </div>
             {displayAll || (
               <div className="Test__container__content__controls">

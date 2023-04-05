@@ -1,184 +1,231 @@
-import React, { createRef, PureComponent } from 'react';
-import ReactDOMServer from 'react-dom/server';
-import PropTypes from 'prop-types';
+import React, {
+  useCallback,
+  useContext,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import makeCancellable from 'make-cancellable-promise';
 import invariant from 'tiny-invariant';
 import warning from 'tiny-warning';
-import * as pdfjs from 'pdfjs-dist/build/pdf';
+import pdfjs from 'pdfjs-dist';
 
 import PageContext from '../PageContext';
 
 import { cancelRunningTask } from '../shared/utils';
 
-import { isPage, isRotate } from '../shared/propTypes';
+export default function TextLayer() {
+  const context = useContext(PageContext);
 
-export class TextLayerInternal extends PureComponent {
-  state = {
-    textContent: null,
-  };
+  invariant(context, 'Unable to find Page context.');
 
-  layerElement = createRef();
+  const {
+    customTextRenderer,
+    onGetTextError,
+    onGetTextSuccess,
+    onRenderTextLayerError,
+    onRenderTextLayerSuccess,
+    page,
+    pageIndex,
+    pageNumber,
+    rotate,
+    scale,
+  } = context;
 
-  componentDidMount() {
-    const { page } = this.props;
+  const [textContent, setTextContent] = useState(undefined);
+  const [textContentError, setTextContentError] = useState(undefined);
+  const layerElement = useRef();
+  const endElement = useRef();
 
-    invariant(page, 'Attempted to load page text content, but no page was specified.');
+  invariant(page, 'Attempted to load page text content, but no page was specified.');
 
-    this.loadTextContent();
-  }
+  warning(
+    parseInt(
+      window.getComputedStyle(document.body).getPropertyValue('--react-pdf-text-layer'),
+      10,
+    ) === 1,
+    'TextLayer styles not found. Read more: https://github.com/wojtekmaj/react-pdf#support-for-text-layer',
+  );
 
-  componentDidUpdate(prevProps) {
-    const { page } = this.props;
-
-    if (prevProps.page && page !== prevProps.page) {
-      this.loadTextContent();
+  /**
+   * Called when a page text content is read successfully
+   */
+  function onLoadSuccess() {
+    if (onGetTextSuccess) {
+      onGetTextSuccess(textContent);
     }
-  }
-
-  componentWillUnmount() {
-    cancelRunningTask(this.runningTask);
-  }
-
-  loadTextContent = () => {
-    const { page } = this.props;
-
-    const cancellable = makeCancellable(page.getTextContent());
-    this.runningTask = cancellable;
-
-    cancellable.promise
-      .then((textContent) => {
-        this.setState({ textContent }, this.onLoadSuccess);
-      })
-      .catch((error) => {
-        this.onLoadError(error);
-      });
-  };
-
-  onLoadSuccess = () => {
-    const { onGetTextSuccess } = this.props;
-    const { textContent } = this.state;
-
-    if (onGetTextSuccess) onGetTextSuccess(textContent);
-  };
-
-  onLoadError = (error) => {
-    this.setState({ textItems: false });
-
-    warning(error);
-
-    const { onGetTextError } = this.props;
-
-    if (onGetTextError) onGetTextError(error);
-  };
-
-  onRenderSuccess = () => {
-    const { onRenderTextLayerSuccess } = this.props;
-
-    if (onRenderTextLayerSuccess) onRenderTextLayerSuccess();
-  };
-
-  onRenderError = (error) => {
-    warning(error);
-
-    const { onRenderTextLayerError } = this.props;
-
-    if (onRenderTextLayerError) onRenderTextLayerError(error);
-  };
-
-  get viewport() {
-    const { page, rotate, scale } = this.props;
-
-    return page.getViewport({ scale, rotation: rotate });
-  }
-
-  get unrotatedViewport() {
-    const { page, scale } = this.props;
-
-    return page.getViewport({ scale });
   }
 
   /**
-   * It might happen that the page is rotated by default. In such cases, we shouldn't rotate
-   * text content.
+   * Called when a page text content failed to read successfully
    */
-  get rotate() {
-    const { page, rotate } = this.props;
-    return rotate - page.rotate;
+  function onLoadError() {
+    warning(false, textContentError);
+
+    if (onGetTextError) {
+      onGetTextError(textContentError);
+    }
   }
 
-  renderTextLayer() {
-    const { textContent } = this.state;
+  function resetTextContent() {
+    setTextContent(undefined);
+    setTextContentError(undefined);
+  }
 
-    if (!textContent) {
-      return null;
+  useEffect(resetTextContent, [page]);
+
+  function loadTextContent() {
+    const cancellable = makeCancellable(page.getTextContent());
+    const runningTask = cancellable;
+
+    cancellable.promise.then(setTextContent).catch((error) => {
+      setTextContent(false);
+      setTextContentError(error);
+    });
+
+    return () => cancelRunningTask(runningTask);
+  }
+
+  useEffect(loadTextContent, [page]);
+
+  useEffect(
+    () => {
+      if (textContent === undefined) {
+        return;
+      }
+
+      if (textContent === false) {
+        onLoadError();
+        return;
+      }
+
+      onLoadSuccess();
+    },
+    // Ommitted callbacks so they are not called every time they change
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [textContent],
+  );
+
+  /**
+   * Called when a text layer is rendered successfully
+   */
+  const onRenderSuccess = useCallback(() => {
+    if (onRenderTextLayerSuccess) {
+      onRenderTextLayerSuccess();
+    }
+  }, [onRenderTextLayerSuccess]);
+
+  /**
+   * Called when a text layer failed to render successfully
+   */
+  const onRenderError = useCallback(
+    (error) => {
+      warning(false, error);
+
+      if (onRenderTextLayerError) {
+        onRenderTextLayerError(error);
+      }
+    },
+    [onRenderTextLayerError],
+  );
+
+  function onMouseDown() {
+    const end = endElement.current;
+
+    if (!end) {
+      return;
     }
 
-    const { viewport } = this;
-    const { customTextRenderer, enhanceTextSelection } = this.props;
+    end.classList.add('active');
+  }
 
-    // If another rendering is in progress, let's cancel it
-    cancelRunningTask(this.runningTask);
+  function onMouseUp() {
+    const end = endElement.current;
+
+    if (!end) {
+      return;
+    }
+
+    end.classList.remove('active');
+  }
+
+  const viewport = useMemo(
+    () => page.getViewport({ scale, rotation: rotate }),
+    [page, rotate, scale],
+  );
+
+  function renderTextLayer() {
+    if (!textContent) {
+      return;
+    }
+
+    const { current: layer } = layerElement;
+
+    layer.innerHTML = '';
+
+    const textContentSource = page.streamTextContent();
 
     const parameters = {
-      container: this.layerElement.current,
-      enhanceTextSelection,
-      textContent,
+      container: layer,
+      textContentSource,
       viewport,
     };
 
-    this.layerElement.current.innerHTML = '';
-
-    this.runningTask = pdfjs.renderTextLayer(parameters);
-    const cancellable = makeCancellable(this.runningTask.promise);
-    this.runningTask = cancellable;
+    const cancellable = pdfjs.renderTextLayer(parameters);
+    const runningTask = cancellable;
 
     cancellable.promise
       .then(() => {
+        const end = document.createElement('div');
+        end.className = 'endOfContent';
+        layer.append(end);
+        endElement.current = end;
+
         if (customTextRenderer) {
-          Array.from(this.layerElement.current.children).forEach((element, elementIndex) => {
-            const reactContent = customTextRenderer({
-              itemIndex: elementIndex,
-              ...textContent.items[elementIndex],
+          let index = 0;
+          textContent.items.forEach((item, itemIndex) => {
+            const child = layer.children[index];
+
+            const content = customTextRenderer({
+              pageIndex,
+              pageNumber,
+              itemIndex,
+              ...item,
             });
-            element.innerHTML = ReactDOMServer.renderToStaticMarkup(reactContent);
+
+            child.innerHTML = content;
+            index += item.str && item.hasEOL ? 2 : 1;
           });
         }
-        this.onRenderSuccess();
+
+        // Intentional immediate callback
+        onRenderSuccess();
       })
-      .catch((error) => {
-        this.onRenderError(error);
-      });
+      .catch(onRenderError);
+
+    return () => cancelRunningTask(runningTask);
   }
 
-  render() {
-    return (
-      <div className="react-pdf__Page__textContent textLayer" ref={this.layerElement}>
-        {this.renderTextLayer()}
-      </div>
-    );
-  }
-}
+  useLayoutEffect(renderTextLayer, [
+    customTextRenderer,
+    onRenderError,
+    onRenderSuccess,
+    page,
+    pageIndex,
+    pageNumber,
+    textContent,
+    viewport,
+  ]);
 
-TextLayerInternal.defaultProps = {
-  enhanceTextSelection: true,
-};
-
-TextLayerInternal.propTypes = {
-  customTextRenderer: PropTypes.func,
-  enhanceTextSelection: PropTypes.bool,
-  onGetTextError: PropTypes.func,
-  onGetTextSuccess: PropTypes.func,
-  onRenderTextLayerError: PropTypes.func,
-  onRenderTextLayerSuccess: PropTypes.func,
-  page: isPage.isRequired,
-  rotate: isRotate,
-  scale: PropTypes.number,
-};
-
-export default function TextLayer(props) {
   return (
-    <PageContext.Consumer>
-      {(context) => <TextLayerInternal {...context} {...props} />}
-    </PageContext.Consumer>
+    // eslint-disable-next-line jsx-a11y/no-static-element-interactions
+    <div
+      className="react-pdf__Page__textContent textLayer"
+      onMouseUp={onMouseUp}
+      onMouseDown={onMouseDown}
+      ref={layerElement}
+    />
   );
 }

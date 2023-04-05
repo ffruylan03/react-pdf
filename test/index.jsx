@@ -1,6 +1,10 @@
-import React from 'react';
-import { render } from 'react-dom';
+import React, { StrictMode } from 'react';
+import { createRoot } from 'react-dom/client';
 
 import Test from './Test';
 
-render(<Test />, document.getElementById('react-root'));
+createRoot(document.getElementById('react-root')).render(
+  <StrictMode>
+    <Test />
+  </StrictMode>,
+);

@@ -1,6 +1,11 @@
 export default {
+  cleanup: () => {
+    // Intentionally empty
+  },
   commonObjs: {
-    get: () => {},
+    get: () => {
+      // Intentionally empty
+    },
   },
   getAnnotations: () => new Promise((resolve, reject) => reject(new Error())),
   getOperatorList: () => new Promise((resolve, reject) => reject(new Error())),
@@ -12,5 +17,8 @@ export default {
   }),
   render: () => ({
     promise: new Promise((resolve, reject) => reject(new Error())),
+    cancel: () => {
+      // Intentionally empty
+    },
   }),
 };

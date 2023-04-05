@@ -1,105 +1,88 @@
-import React, { createRef, PureComponent } from 'react';
-import PropTypes from 'prop-types';
-import makeCancellable from 'make-cancellable-promise';
+import React, { useCallback, useContext, useEffect, useMemo, useRef } from 'react';
 import mergeRefs from 'merge-refs';
+import invariant from 'tiny-invariant';
 import warning from 'tiny-warning';
-import * as pdfjs from 'pdfjs-dist/build/pdf';
+import pdfjs from 'pdfjs-dist';
 
 import PageContext from '../PageContext';
 
-import { getPixelRatio, isCancelException, makePageCallback } from '../shared/utils';
+import {
+  cancelRunningTask,
+  getDevicePixelRatio,
+  isCancelException,
+  makePageCallback,
+} from '../shared/utils';
 
-import { isPage, isRef, isRotate } from '../shared/propTypes';
+import { isRef } from '../shared/propTypes';
 
 const ANNOTATION_MODE = pdfjs.AnnotationMode;
 
-export class PageCanvasInternal extends PureComponent {
-  canvasElement = createRef();
+export default function PageCanvas({ canvasRef, ...props }) {
+  const context = useContext(PageContext);
 
-  componentDidMount() {
-    this.drawPageOnCanvas();
-  }
+  invariant(context, 'Unable to find Page context.');
 
-  componentDidUpdate(prevProps) {
-    const { canvasBackground, page, renderForms } = this.props;
-    if (canvasBackground !== prevProps.canvasBackground || renderForms !== prevProps.renderForms) {
-      // Ensures the canvas will be re-rendered from scratch. Otherwise all form data will stay.
-      page.cleanup();
-      this.drawPageOnCanvas();
-    }
-  }
+  const mergedProps = { ...context, ...props };
+  const {
+    canvasBackground,
+    devicePixelRatio: devicePixelRatioProps,
+    onRenderError: onRenderErrorProps,
+    onRenderSuccess: onRenderSuccessProps,
+    page,
+    renderForms,
+    rotate,
+    scale,
+  } = mergedProps;
 
-  componentWillUnmount() {
-    this.cancelRenderingTask();
+  const canvasElement = useRef();
 
-    const { current: canvas } = this.canvasElement;
+  invariant(page, 'Attempted to render page canvas, but no page was specified.');
 
-    /**
-     * Zeroing the width and height cause most browsers to release graphics
-     * resources immediately, which can greatly reduce memory consumption.
-     */
-    if (canvas) {
-      canvas.width = 0;
-      canvas.height = 0;
-    }
-  }
-
-  cancelRenderingTask() {
-    if (this.renderer) {
-      this.renderer.cancel();
-      this.renderer = null;
-    }
-  }
+  const devicePixelRatio = devicePixelRatioProps || getDevicePixelRatio();
 
   /**
    * Called when a page is rendered successfully.
    */
-  onRenderSuccess = () => {
-    this.renderer = null;
-
-    const { onRenderSuccess, page, scale } = this.props;
-
-    if (onRenderSuccess) onRenderSuccess(makePageCallback(page, scale));
-  };
+  function onRenderSuccess() {
+    if (onRenderSuccessProps) {
+      onRenderSuccessProps(makePageCallback(page, scale));
+    }
+  }
 
   /**
    * Called when a page fails to render.
    */
-  onRenderError = (error) => {
+  function onRenderError(error) {
     if (isCancelException(error)) {
       return;
     }
 
-    warning(error);
+    warning(false, error);
 
-    const { onRenderError } = this.props;
-
-    if (onRenderError) onRenderError(error);
-  };
-
-  get renderViewport() {
-    const { page, rotate, scale } = this.props;
-
-    const pixelRatio = getPixelRatio();
-
-    return page.getViewport({ scale: scale * pixelRatio, rotation: rotate });
+    if (onRenderErrorProps) {
+      onRenderErrorProps(error);
+    }
   }
 
-  get viewport() {
-    const { page, rotate, scale } = this.props;
+  const renderViewport = useMemo(
+    () => page.getViewport({ scale: scale * devicePixelRatio, rotation: rotate }),
+    [devicePixelRatio, page, rotate, scale],
+  );
 
-    return page.getViewport({ scale, rotation: rotate });
-  }
+  const viewport = useMemo(
+    () => page.getViewport({ scale, rotation: rotate }),
+    [page, rotate, scale],
+  );
 
-  drawPageOnCanvas = () => {
-    const { current: canvas } = this.canvasElement;
+  function drawPageOnCanvas() {
+    // Ensures the canvas will be re-rendered from scratch. Otherwise all form data will stay.
+    page.cleanup();
+
+    const { current: canvas } = canvasElement;
 
     if (!canvas) {
       return null;
     }
-
-    const { renderViewport, viewport } = this;
-    const { canvasBackground, page, renderForms } = this.props;
 
     canvas.width = renderViewport.width;
     canvas.height = renderViewport.height;
@@ -110,7 +93,7 @@ export class PageCanvasInternal extends PureComponent {
     const renderContext = {
       annotationMode: renderForms ? ANNOTATION_MODE.ENABLE_FORMS : ANNOTATION_MODE.ENABLE,
       get canvasContext() {
-        return canvas.getContext('2d');
+        return canvas.getContext('2d', { alpha: false });
       },
       viewport: renderViewport,
     };
@@ -118,46 +101,57 @@ export class PageCanvasInternal extends PureComponent {
       renderContext.background = canvasBackground;
     }
 
-    // If another render is in progress, let's cancel it
-    this.cancelRenderingTask();
+    const cancellable = page.render(renderContext);
+    const runningTask = cancellable;
 
-    this.renderer = makeCancellable(page.render(renderContext).promise);
+    cancellable.promise.then(onRenderSuccess).catch(onRenderError);
 
-    return this.renderer.promise.then(this.onRenderSuccess).catch(this.onRenderError);
-  };
-
-  render() {
-    const { canvasRef } = this.props;
-
-    return (
-      <canvas
-        className="react-pdf__Page__canvas"
-        dir="ltr"
-        ref={mergeRefs(canvasRef, this.canvasElement)}
-        style={{
-          display: 'block',
-          userSelect: 'none',
-        }}
-      />
-    );
+    return () => cancelRunningTask(runningTask);
   }
-}
 
-PageCanvasInternal.propTypes = {
-  canvasBackground: PropTypes.string,
-  canvasRef: isRef,
-  onRenderError: PropTypes.func,
-  onRenderSuccess: PropTypes.func,
-  page: isPage.isRequired,
-  renderForms: PropTypes.bool,
-  rotate: isRotate,
-  scale: PropTypes.number.isRequired,
-};
+  useEffect(
+    drawPageOnCanvas,
+    // Ommitted callbacks so they are not called every time they change
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [
+      canvasBackground,
+      canvasElement,
+      devicePixelRatio,
+      page,
+      renderForms,
+      renderViewport,
+      viewport,
+    ],
+  );
 
-export default function PageCanvas(props) {
+  const cleanup = useCallback(() => {
+    const { current: canvas } = canvasElement;
+
+    /**
+     * Zeroing the width and height cause most browsers to release graphics
+     * resources immediately, which can greatly reduce memory consumption.
+     */
+    if (canvas) {
+      canvas.width = 0;
+      canvas.height = 0;
+    }
+  }, [canvasElement]);
+
+  useEffect(() => cleanup, [cleanup]);
+
   return (
-    <PageContext.Consumer>
-      {(context) => <PageCanvasInternal {...context} {...props} />}
-    </PageContext.Consumer>
+    <canvas
+      className="react-pdf__Page__canvas"
+      dir="ltr"
+      ref={mergeRefs(canvasRef, canvasElement)}
+      style={{
+        display: 'block',
+        userSelect: 'none',
+      }}
+    />
   );
 }
+
+PageCanvas.propTypes = {
+  canvasRef: isRef,
+};

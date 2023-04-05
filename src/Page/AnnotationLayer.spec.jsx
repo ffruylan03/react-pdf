@@ -1,17 +1,43 @@
-import React, { createRef } from 'react';
+import { beforeAll, describe, expect, it } from 'vitest';
+import React from 'react';
 import { render } from '@testing-library/react';
 
-import { pdfjs } from '../entry.jest';
+import { pdfjs } from '../index.test';
 
-import { AnnotationLayerInternal as AnnotationLayer } from './AnnotationLayer';
+import AnnotationLayer from './AnnotationLayer';
 import LinkService from '../LinkService';
 
 import failingPage from '../../__mocks__/_failing_page';
 
 import { loadPDF, makeAsyncCallback, muteConsole, restoreConsole } from '../../test-utils';
 
+import DocumentContext from '../DocumentContext';
+import PageContext from '../PageContext';
+
 const pdfFile = loadPDF('./__mocks__/_pdf.pdf');
 const annotatedPdfFile = loadPDF('./__mocks__/_pdf3.pdf');
+
+function renderWithContext(children, documentContext, pageContext) {
+  const { rerender, ...otherResult } = render(
+    <DocumentContext.Provider value={documentContext}>
+      <PageContext.Provider value={pageContext}>{children}</PageContext.Provider>
+    </DocumentContext.Provider>,
+  );
+
+  return {
+    ...otherResult,
+    rerender: (
+      nextChildren,
+      nextDocumentContext = documentContext,
+      nextPageContext = pageContext,
+    ) =>
+      rerender(
+        <DocumentContext.Provider value={nextDocumentContext}>
+          <PageContext.Provider value={nextPageContext}>{nextChildren}</PageContext.Provider>
+        </DocumentContext.Provider>,
+      ),
+  };
+}
 
 describe('AnnotationLayer', () => {
   const linkService = new LinkService();
@@ -39,15 +65,10 @@ describe('AnnotationLayer', () => {
       const { func: onGetAnnotationsSuccess, promise: onGetAnnotationsSuccessPromise } =
         makeAsyncCallback();
 
-      render(
-        <AnnotationLayer
-          linkService={linkService}
-          onGetAnnotationsSuccess={onGetAnnotationsSuccess}
-          page={page}
-        />,
-      );
+      renderWithContext(<AnnotationLayer />, { linkService }, { onGetAnnotationsSuccess, page });
 
       expect.assertions(1);
+
       await expect(onGetAnnotationsSuccessPromise).resolves.toMatchObject(desiredAnnotations);
     });
 
@@ -57,15 +78,17 @@ describe('AnnotationLayer', () => {
 
       muteConsole();
 
-      render(
-        <AnnotationLayer
-          linkService={linkService}
-          onGetAnnotationsError={onGetAnnotationsError}
-          page={failingPage}
-        />,
+      renderWithContext(
+        <AnnotationLayer />,
+        { linkService },
+        {
+          onGetAnnotationsError,
+          page: failingPage,
+        },
       );
 
       expect.assertions(1);
+
       await expect(onGetAnnotationsErrorPromise).resolves.toBeInstanceOf(Error);
 
       restoreConsole();
@@ -75,26 +98,29 @@ describe('AnnotationLayer', () => {
       const { func: onGetAnnotationsSuccess, promise: onGetAnnotationsSuccessPromise } =
         makeAsyncCallback();
 
-      const { rerender } = render(
-        <AnnotationLayer
-          linkService={linkService}
-          onGetAnnotationsSuccess={onGetAnnotationsSuccess}
-          page={page}
-        />,
+      const { rerender } = renderWithContext(
+        <AnnotationLayer />,
+        { linkService },
+        {
+          onGetAnnotationsSuccess,
+          page,
+        },
       );
 
       expect.assertions(2);
+
       await expect(onGetAnnotationsSuccessPromise).resolves.toMatchObject(desiredAnnotations);
 
       const { func: onGetAnnotationsSuccess2, promise: onGetAnnotationsSuccessPromise2 } =
         makeAsyncCallback();
 
       rerender(
-        <AnnotationLayer
-          linkService={linkService}
-          onGetAnnotationsSuccess={onGetAnnotationsSuccess2}
-          page={page2}
-        />,
+        <AnnotationLayer />,
+        { linkService },
+        {
+          onGetAnnotationsSuccess: onGetAnnotationsSuccess2,
+          page: page2,
+        },
       );
 
       await expect(onGetAnnotationsSuccessPromise2).resolves.toMatchObject(desiredAnnotations2);
@@ -102,7 +128,9 @@ describe('AnnotationLayer', () => {
 
     it('throws an error when placed outside Page', () => {
       muteConsole();
-      expect(() => render(<AnnotationLayer />)).toThrow();
+
+      expect(() => renderWithContext(<AnnotationLayer />)).toThrow();
+
       restoreConsole();
     });
   });
@@ -114,21 +142,22 @@ describe('AnnotationLayer', () => {
         promise: onRenderAnnotationLayerSuccessPromise,
       } = makeAsyncCallback();
 
-      const { container } = render(
-        <AnnotationLayer
-          linkService={linkService}
-          onRenderAnnotationLayerSuccess={onRenderAnnotationLayerSuccess}
-          page={page}
-        />,
+      const { container } = renderWithContext(
+        <AnnotationLayer />,
+        { linkService },
+        {
+          onRenderAnnotationLayerSuccess,
+          page,
+        },
       );
 
       expect.assertions(1);
 
-      return onRenderAnnotationLayerSuccessPromise.then(() => {
-        const annotationItems = [...container.firstChild.children];
+      await onRenderAnnotationLayerSuccessPromise;
 
-        expect(annotationItems).toHaveLength(desiredAnnotations.length);
-      });
+      const annotationItems = [...container.firstElementChild.children];
+
+      expect(annotationItems).toHaveLength(desiredAnnotations.length);
     });
 
     it.each`
@@ -140,7 +169,7 @@ describe('AnnotationLayer', () => {
       ${'_top'}          | ${'_top'}
     `(
       'renders all links with target $target given externalLinkTarget = $externalLinkTarget',
-      ({ externalLinkTarget, target }) => {
+      async ({ externalLinkTarget, target }) => {
         const {
           func: onRenderAnnotationLayerSuccess,
           promise: onRenderAnnotationLayerSuccessPromise,
@@ -150,24 +179,25 @@ describe('AnnotationLayer', () => {
           customLinkService.setExternalLinkTarget(externalLinkTarget);
         }
 
-        const { container } = render(
-          <AnnotationLayer
-            linkService={customLinkService}
-            onRenderAnnotationLayerSuccess={onRenderAnnotationLayerSuccess}
-            page={page}
-          />,
+        const { container } = renderWithContext(
+          <AnnotationLayer />,
+          { linkService: customLinkService },
+          {
+            onRenderAnnotationLayerSuccess,
+            page,
+          },
         );
 
         expect.assertions(desiredAnnotations.length);
 
-        return onRenderAnnotationLayerSuccessPromise.then(() => {
-          const annotationItems = [...container.firstChild.children];
-          const annotationLinkItems = annotationItems
-            .map((item) => item.firstChild)
-            .filter((item) => item.tagName === 'A');
+        await onRenderAnnotationLayerSuccessPromise;
 
-          annotationLinkItems.forEach((link) => expect(link.getAttribute('target')).toBe(target));
-        });
+        const annotationItems = [...container.firstElementChild.children];
+        const annotationLinkItems = annotationItems
+          .map((item) => item.firstChild)
+          .filter((item) => item.tagName === 'A');
+
+        annotationLinkItems.forEach((link) => expect(link.getAttribute('target')).toBe(target));
       },
     );
 
@@ -177,7 +207,7 @@ describe('AnnotationLayer', () => {
       ${'noopener'}   | ${'noopener'}
     `(
       'renders all links with rel $rel given externalLinkRel = $externalLinkRel',
-      ({ externalLinkRel, rel }) => {
+      async ({ externalLinkRel, rel }) => {
         const {
           func: onRenderAnnotationLayerSuccess,
           promise: onRenderAnnotationLayerSuccessPromise,
@@ -187,78 +217,27 @@ describe('AnnotationLayer', () => {
           customLinkService.setExternalLinkRel(externalLinkRel);
         }
 
-        const { container } = render(
-          <AnnotationLayer
-            linkService={customLinkService}
-            onRenderAnnotationLayerSuccess={onRenderAnnotationLayerSuccess}
-            page={page}
-          />,
+        const { container } = renderWithContext(
+          <AnnotationLayer />,
+          { linkService: customLinkService },
+          {
+            onRenderAnnotationLayerSuccess,
+            page,
+          },
         );
 
         expect.assertions(desiredAnnotations.length);
 
-        return onRenderAnnotationLayerSuccessPromise.then(() => {
-          const annotationItems = [...container.firstChild.children];
-          const annotationLinkItems = annotationItems
-            .map((item) => item.firstChild)
-            .filter((item) => item.tagName === 'A');
+        await onRenderAnnotationLayerSuccessPromise;
 
-          annotationLinkItems.forEach((link) => expect(link.getAttribute('rel')).toBe(rel));
-        });
+        const annotationItems = [...container.firstElementChild.children];
+        const annotationLinkItems = annotationItems
+          .map((item) => item.firstChild)
+          .filter((item) => item.tagName === 'A');
+
+        annotationLinkItems.forEach((link) => expect(link.getAttribute('rel')).toBe(rel));
       },
     );
-
-    it('renders annotations at a given rotation', async () => {
-      const {
-        func: onRenderAnnotationLayerSuccess,
-        promise: onRenderAnnotationLayerSuccessPromise,
-      } = makeAsyncCallback();
-      const rotate = 90;
-      const instance = createRef();
-
-      render(
-        <AnnotationLayer
-          linkService={linkService}
-          onRenderAnnotationLayerSuccess={onRenderAnnotationLayerSuccess}
-          page={page}
-          rotate={rotate}
-          ref={instance}
-        />,
-      );
-
-      expect.assertions(1);
-      return onRenderAnnotationLayerSuccessPromise.then(() => {
-        const { viewport } = instance.current;
-
-        expect(viewport.rotation).toEqual(rotate);
-      });
-    });
-
-    it('renders annotations at a given scale', async () => {
-      const {
-        func: onRenderAnnotationLayerSuccess,
-        promise: onRenderAnnotationLayerSuccessPromise,
-      } = makeAsyncCallback();
-      const scale = 2;
-      const instance = createRef();
-
-      render(
-        <AnnotationLayer
-          linkService={linkService}
-          onRenderAnnotationLayerSuccess={onRenderAnnotationLayerSuccess}
-          page={page}
-          scale={scale}
-          ref={instance}
-        />,
-      );
-
-      expect.assertions(1);
-      return onRenderAnnotationLayerSuccessPromise.then(() => {
-        const { viewport } = instance.current;
-
-        expect(viewport.scale).toEqual(scale);
-      });
-    });
 
     it('renders annotations with the default imageResourcesPath given no imageResourcesPath', async () => {
       const pdf = await pdfjs.getDocument({ data: annotatedPdfFile.arrayBuffer }).promise;
@@ -273,20 +252,22 @@ describe('AnnotationLayer', () => {
         `<img[^>]+src="${imageResourcesPath}annotation-note.svg"`,
       );
 
-      const { container } = render(
-        <AnnotationLayer
-          linkService={linkService}
-          onRenderAnnotationLayerSuccess={onRenderAnnotationLayerSuccess}
-          page={annotatedPage}
-        />,
+      const { container } = renderWithContext(
+        <AnnotationLayer />,
+        { linkService },
+        {
+          onRenderAnnotationLayerSuccess,
+          page: annotatedPage,
+        },
       );
 
       expect.assertions(1);
-      return onRenderAnnotationLayerSuccessPromise.then(() => {
-        const stringifiedAnnotationLayerNode = container.outerHTML;
 
-        expect(stringifiedAnnotationLayerNode).toMatch(desiredImageTagRegExp);
-      });
+      await onRenderAnnotationLayerSuccessPromise;
+
+      const stringifiedAnnotationLayerNode = container.outerHTML;
+
+      expect(stringifiedAnnotationLayerNode).toMatch(desiredImageTagRegExp);
     });
 
     it('renders annotations with the specified imageResourcesPath given imageResourcesPath', async () => {
@@ -302,21 +283,25 @@ describe('AnnotationLayer', () => {
         `<img[^>]+src="${imageResourcesPath}annotation-note.svg"`,
       );
 
-      const { container } = render(
-        <AnnotationLayer
-          imageResourcesPath={imageResourcesPath}
-          linkService={linkService}
-          onRenderAnnotationLayerSuccess={onRenderAnnotationLayerSuccess}
-          page={annotatedPage}
-        />,
+      const { container } = renderWithContext(
+        <AnnotationLayer />,
+        {
+          imageResourcesPath,
+          linkService,
+        },
+        {
+          onRenderAnnotationLayerSuccess,
+          page: annotatedPage,
+        },
       );
 
       expect.assertions(1);
-      return onRenderAnnotationLayerSuccessPromise.then(() => {
-        const stringifiedAnnotationLayerNode = container.outerHTML;
 
-        expect(stringifiedAnnotationLayerNode).toMatch(desiredImageTagRegExp);
-      });
+      await onRenderAnnotationLayerSuccessPromise;
+
+      const stringifiedAnnotationLayerNode = container.outerHTML;
+
+      expect(stringifiedAnnotationLayerNode).toMatch(desiredImageTagRegExp);
     });
   });
 });

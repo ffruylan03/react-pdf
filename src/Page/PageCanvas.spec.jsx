@@ -1,15 +1,30 @@
+import { beforeAll, describe, expect, it, vi } from 'vitest';
 import React from 'react';
 import { render } from '@testing-library/react';
 
-import { pdfjs } from '../entry.jest';
+import { pdfjs } from '../index.test';
 
-import { PageCanvasInternal as PageCanvas } from './PageCanvas';
+import PageCanvas from './PageCanvas';
 
 import failingPage from '../../__mocks__/_failing_page';
 
 import { loadPDF, makeAsyncCallback, muteConsole, restoreConsole } from '../../test-utils';
 
+import PageContext from '../PageContext';
+
 const pdfFile = loadPDF('./__mocks__/_pdf.pdf');
+
+function renderWithContext(children, context) {
+  const { rerender, ...otherResult } = render(
+    <PageContext.Provider value={context}>{children}</PageContext.Provider>,
+  );
+
+  return {
+    ...otherResult,
+    rerender: (nextChildren, nextContext = context) =>
+      rerender(<PageContext.Provider value={nextContext}>{nextChildren}</PageContext.Provider>),
+  };
+}
 
 describe('PageCanvas', () => {
   // Loaded page
@@ -24,6 +39,9 @@ describe('PageCanvas', () => {
     pageWithRendererMocked = Object.assign(page, {
       render: () => ({
         promise: new Promise((resolve) => resolve()),
+        cancel: () => {
+          // Intentionally empty
+        },
       }),
     });
   });
@@ -34,9 +52,11 @@ describe('PageCanvas', () => {
 
       muteConsole();
 
-      render(
-        <PageCanvas onRenderSuccess={onRenderSuccess} page={pageWithRendererMocked} scale={1} />,
-      );
+      renderWithContext(<PageCanvas />, {
+        onRenderSuccess,
+        page: pageWithRendererMocked,
+        scale: 1,
+      });
 
       expect.assertions(1);
 
@@ -50,7 +70,11 @@ describe('PageCanvas', () => {
 
       muteConsole();
 
-      render(<PageCanvas onRenderError={onRenderError} page={failingPage} scale={1} />);
+      renderWithContext(<PageCanvas />, {
+        onRenderError,
+        page: failingPage,
+        scale: 1,
+      });
 
       expect.assertions(1);
 
@@ -62,12 +86,15 @@ describe('PageCanvas', () => {
 
   describe('rendering', () => {
     it('passes canvas element to canvasRef properly', () => {
-      const canvasRef = jest.fn();
+      const canvasRef = vi.fn();
 
-      render(<PageCanvas canvasRef={canvasRef} page={page} scale={1} />);
+      renderWithContext(<PageCanvas canvasRef={canvasRef} />, {
+        page: pageWithRendererMocked,
+        scale: 1,
+      });
 
       expect(canvasRef).toHaveBeenCalled();
-      expect(canvasRef.mock.calls[0][0]).toBeInstanceOf(HTMLElement);
+      expect(canvasRef).toHaveBeenCalledWith(expect.any(HTMLElement));
     });
   });
 });

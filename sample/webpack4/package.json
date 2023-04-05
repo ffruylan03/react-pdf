@@ -4,8 +4,8 @@
   "description": "A sample page for React-PDF.",
   "private": true,
   "scripts": {
-    "build": "NODE_ENV=production webpack",
-    "start": "NODE_ENV=development webpack serve"
+    "build": "NODE_OPTIONS=--openssl-legacy-provider NODE_ENV=production webpack",
+    "dev": "NODE_OPTIONS=--openssl-legacy-provider NODE_ENV=development webpack serve"
   },
   "author": {
     "name": "Wojciech Maj",
@@ -13,26 +13,22 @@
   },
   "license": "MIT",
   "dependencies": {
-    "react": "^17.0.0",
-    "react-dom": "^17.0.0",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
     "react-pdf": "latest"
   },
   "devDependencies": {
-    "@babel/core": "^7.15.0",
-    "@babel/preset-env": "^7.15.0",
+    "@babel/core": "^7.20.2",
+    "@babel/preset-env": "^7.20.2",
     "@babel/preset-react": "^7.14.0",
     "babel-loader": "^8.0.0",
     "copy-webpack-plugin": "^6.4.0",
     "css-loader": "^5.2.0",
+    "file-loader": "^6.0.0",
     "html-webpack-plugin": "^4.5.0",
-    "less": "^4.0.0",
-    "less-loader": "^7.3.0",
     "style-loader": "^2.0.0",
     "webpack": "^4.46.0",
     "webpack-cli": "^4.7.0",
-    "webpack-dev-server": "^4.0.0"
-  },
-  "resolutions": {
-    "semver@7.0.0": "^7.0.0"
+    "webpack-dev-server": "^4.13.1"
   }
 }
